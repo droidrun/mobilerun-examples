@@ -1,0 +1,4 @@
+interface:
+  display_name: "mobilerun webhooks"
+  short_description: "Build secure mobilerun webhook integrations"
+  default_prompt: "Use $mobilerun-webhooks to create and test a signed webhook receiver with file downloads."
