@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import sys
 from pathlib import Path
 
-EXAMPLE_ROOT = Path(__file__).parents[1]
-sys.path.insert(0, str(EXAMPLE_ROOT))
-
-from mobilerun_webhook_receiver.config import Config  # noqa: E402
+from mobilerun_webhook_receiver.config import Config
 
 SECRET = b"whsec_test"
 NOW_MS = 1_800_000_000_000

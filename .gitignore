@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .coverage
+htmlcov/
+.ruff_cache/
 downloads/
 node_modules/
 dist/

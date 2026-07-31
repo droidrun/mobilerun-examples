@@ -16,12 +16,6 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export const runTaskRequestSchema = z
   .object({
     task: z.string().trim().min(1).max(8_000),
-    llmModel: z
-      .string()
-      .trim()
-      .min(1)
-      .max(160)
-      .default('google/gemini-3.1-flash-lite'),
     deviceId: z.uuid(),
     maxSteps: z.number().int().min(1).max(100).default(30),
   })

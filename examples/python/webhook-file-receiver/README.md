@@ -48,12 +48,17 @@ runtime.
 
 ```text
 receiver.py                         # minimal executable entry point
+showcase.py                         # protected live workflow demo server
+showcase.html                       # presentation UI document
+showcase.css                        # responsive visual design
+showcase.js                         # session, launch, and live event client
 mobilerun_webhook_receiver/
   config.py                         # environment validation
   security.py                       # HMAC and replay protection
   downloader.py                     # SDK request and atomic file storage
   application.py                    # webhook event processing
   http_server.py                    # HTTP transport
+  showcase_events.py                # bounded event replay for the showcase
 ```
 
 The layers are composed through small interfaces, so authentication, download,
@@ -75,6 +80,9 @@ WEBHOOK_PATH=/mobilerun/a-long-random-private-path
 WEBHOOK_SECRET=whsec_...
 DOWNLOAD_DIR=./downloads
 ```
+
+Use `https://dev-api.mobilerun.ai/v1` as `MOBILERUN_BASE_URL` when testing
+with a development API key.
 
 `WEBHOOK_SECRET` is the one-time secret returned when the webhook endpoint is
 created; it is not the API key or the private URL path.
@@ -99,12 +107,64 @@ ngrok http 3000
 Configure the webhook endpoint URL as the ngrok HTTPS origin followed by
 `WEBHOOK_PATH`.
 
+## Live showcase UI
+
+`showcase.py` adds a presentation-friendly workflow launcher, a live webhook
+timeline, and an inline preview for small text files. Browser-facing APIs are
+protected by a short-lived session cookie established from the access token in
+the generated showcase URL. The webhook callback remains protected separately
+by its Mobilerun HMAC signature.
+
+Start ngrok first, then launch the showcase with your custom trigger ID:
+
+```bash
+ngrok http 3000
+PUBLIC_URL=https://your-tunnel.ngrok.app \
+SHOWCASE_TRIGGER_ID=your-custom-trigger-uuid \
+uv run python showcase.py
+```
+
+The process prints one JSON object:
+
+```json
+{
+  "showcaseUrl": "https://your-tunnel.ngrok.app/#access_token=...",
+  "webhookUrl": "https://your-tunnel.ngrok.app/mobilerun/showcase-...",
+  "webhookId": "webhook-uuid",
+  "temporaryWebhook": true
+}
+```
+
+Before starting the workflow, set the `endpointId` of its `webhooks.send`
+action to the printed `webhookId`. Then open the complete `showcaseUrl`; the
+fragment contains the private browser access token and is removed from the
+address bar after the session is established.
+
+The temporary endpoint is deleted when the process exits. The workflow action
+will still contain its old ID, so update it with the newly printed ID on the
+next run. To keep and reuse an endpoint instead, set `SHOWCASE_WEBHOOK_ID`,
+`SHOWCASE_WEBHOOK_PATH`, and `SHOWCASE_WEBHOOK_SECRET` together; a reused
+endpoint is never deleted by the showcase.
+
+The optional `SHOWCASE_TRIGGER_ID` is strongly recommended for shared demos. It
+limits the UI to one custom trigger and rejects attempts to fire another. When
+it is omitted, the UI lists all custom triggers available to the API key.
+
+Any verified `data.file` reference is downloaded with the same guarded, atomic
+downloader as the minimal receiver. Small `text/*`, JSON, XML, and CSV files are
+shown inline and retain a visible download button. Binary files remain
+download-only. Configure the preview limit with `SHOWCASE_PREVIEW_MAX_BYTES`.
+
 When a verified `workflow.step.emit` event contains `data.file`, the file is
 saved under `DOWNLOAD_DIR` as:
 
 ```text
 <file-id>--<original-filename>
 ```
+
+This is a single-process showcase, not a hosted multi-user application. For a
+long-running deployment, use persistent event storage, server-side user
+authentication, rate limiting, and a production HTTP server.
 
 ## Expected file payload
 
@@ -138,7 +198,5 @@ X-Mobilerun-Signature: sha256=<hex>
 From the repository root:
 
 ```bash
-uv run python -m unittest discover \
-  -s examples/python/webhook-file-receiver/tests \
-  -p 'test_*.py' -v
+uv run --group dev pytest -q
 ```

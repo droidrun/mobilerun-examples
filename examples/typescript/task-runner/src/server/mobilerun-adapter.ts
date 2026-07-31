@@ -18,11 +18,14 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const LLM_MODEL = 'google/gemini-3.1-flash-lite';
+
 export function createMobilerunTaskDeps(client: Mobilerun): TaskServiceDeps {
   return {
     async runTask(input: RunTaskRequest) {
       const result = await client.tasks.run({
         ...input,
+        llmModel: LLM_MODEL,
         outputSchema: OUTPUT_SCHEMA,
       });
       return {

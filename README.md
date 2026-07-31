@@ -32,7 +32,7 @@
 | Language | Example | What it demonstrates |
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
-| Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, replay protection, secure SDK downloads, and atomic file storage |
+| Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
 
 Each example is self-contained, runnable, and documents the decisions you
 should revisit before taking it to production.
@@ -59,13 +59,20 @@ Install the dependencies and run the test suite from this repository:
 
 ```bash
 uv sync
-uv run python -m unittest discover \
-  -s examples/python/webhook-file-receiver/tests \
-  -p 'test_*.py' -v
+uv run --group dev pytest -q
 ```
 
 Then open the [webhook receiver guide](examples/python/webhook-file-receiver/README.md)
 for configuration and local run instructions.
+
+## Check everything
+
+After installing [uv](https://docs.astral.sh/uv/) and
+[Bun](https://bun.sh/), run the repository check from the root:
+
+```bash
+./scripts/check.sh
+```
 
 ## 📂 Repository layout
 

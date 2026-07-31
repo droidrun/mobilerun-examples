@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Mobilerun Signal Room</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    >
+    <link href="/showcase.css" rel="stylesheet">
+    <script src="/showcase.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand"><span class="mark"></span>MOBILERUN / SIGNAL ROOM</div>
+      <div class="live" aria-live="polite">
+        <span class="pulse"></span><span id="connection">CONNECTING</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="control">
+        <div class="eyebrow">Workflow launch console</div>
+        <h1>Fire it.<br><i>Watch it land.</i></h1>
+        <p class="lede">
+          Start a real Mobilerun workflow. Signed webhook events appear on the
+          right; emitted files are authenticated, downloaded, previewed, and
+          ready to open.
+        </p>
+
+        <label for="trigger">Custom trigger</label>
+        <select id="trigger"><option>Loading workflow…</option></select>
+
+        <label for="payload">Trigger payload / JSON</label>
+        <textarea id="payload" spellcheck="false">{
+  "source": "live-showcase",
+  "requestedAt": "now"
+}</textarea>
+
+        <button id="start" type="button">
+          <span>START WORKFLOW</span><span aria-hidden="true">↗</span>
+        </button>
+
+        <div class="url">
+          <span class="eyebrow">Webhook ingress</span><br>
+          <span id="webhook-url">Preparing secure endpoint…</span>
+        </div>
+      </section>
+
+      <section class="signal">
+        <div class="signal-head">
+          <div>
+            <div class="eyebrow">Inbound signal</div>
+            <h2>Webhook timeline</h2>
+          </div>
+          <span class="count" id="count">00 EVENTS</span>
+        </div>
+        <div class="events" id="events" aria-live="polite">
+          <div class="empty">
+            <div>
+              <div class="radar"></div>
+              <strong>Listening for Mobilerun</strong><br>
+              <small>Events will arrive here in real time.</small>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status"></div>
+  </body>
+</html>

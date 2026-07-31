@@ -48,6 +48,12 @@ Set the server-side key:
 MOBILERUN_CLOUD_API_KEY=dr_sk_...
 ```
 
+For a development key, set the API base explicitly:
+
+```dotenv
+MOBILERUN_API_URL=https://dev-api.mobilerun.ai/v1
+```
+
 The example always binds to `127.0.0.1`; it cannot accidentally expose its
 unauthenticated task and stream-credential routes to the local network. Put an
 authenticated application or reverse proxy in front of it before making it
@@ -76,8 +82,8 @@ the example server.
 | `GET /api/health` | Report whether the server SDK is configured |
 
 The start route requires `deviceId` and intentionally accepts only `task`,
-`llmModel`, `deviceId`, and `maxSteps`. Sensitive or expensive SDK options
-cannot be passed through from the browser.
+`deviceId`, and `maxSteps`. The server owns the model and output schema, so
+sensitive or expensive SDK options cannot be passed through from the browser.
 
 The server adds a fixed output schema with a short `summary` and an
 `observations` list. Keeping the schema server-side prevents the browser from

@@ -7,6 +7,8 @@ import {
 } from './runner-machine';
 
 const POLL_INTERVAL_MS = 2_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_POLL_INTERVAL_MS = 15_000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -14,6 +16,13 @@ function errorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function requestSignal(parent: AbortSignal): AbortSignal {
+  return AbortSignal.any([
+    parent,
+    AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  ]);
 }
 
 export function useTaskRunner() {
@@ -40,7 +49,10 @@ export function useTaskRunner() {
     dispatch({ type: 'start-requested' });
 
     try {
-      const started = await taskRunnerApi.start(input, controller.signal);
+      const started = await taskRunnerApi.start(
+        input,
+        requestSignal(controller.signal),
+      );
       if (!controller.signal.aborted) {
         dispatch({ type: 'start-succeeded', run: started });
       }
@@ -87,23 +99,26 @@ export function useTaskRunner() {
 
     const controller = new AbortController();
     let timer: number | undefined;
+    let pollInterval = POLL_INTERVAL_MS;
 
     const poll = async () => {
       try {
         const task = await taskRunnerApi.retrieve(
           state.runId as string,
-          controller.signal,
+          requestSignal(controller.signal),
         );
         if (!controller.signal.aborted) {
+          pollInterval = POLL_INTERVAL_MS;
           dispatch({ type: 'poll-succeeded', task });
         }
       } catch (error) {
         if (!isAbortError(error)) {
+          pollInterval = Math.min(pollInterval * 2, MAX_POLL_INTERVAL_MS);
           dispatch({ type: 'poll-failed', message: errorMessage(error) });
         }
       } finally {
         if (!controller.signal.aborted) {
-          timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+          timer = window.setTimeout(poll, pollInterval);
         }
       }
     };

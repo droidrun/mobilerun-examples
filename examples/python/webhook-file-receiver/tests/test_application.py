@@ -8,8 +8,6 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from support import FILE_ID, FakeDownloader, config, signature
-
 from mobilerun_webhook_receiver.application import WebhookApplication
 from mobilerun_webhook_receiver.security import (
     EVENT_ID_HEADER,
@@ -17,6 +15,7 @@ from mobilerun_webhook_receiver.security import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
 )
+from support import FILE_ID, FakeDownloader, config, signature
 
 
 class ApplicationTests(unittest.TestCase):
@@ -83,6 +82,26 @@ class ApplicationTests(unittest.TestCase):
 
             self.assertEqual(status, 400)
             self.assertEqual(result["message"], "event id mismatch")
+
+    def test_accepts_case_insensitive_webhook_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = WebhookApplication(
+                config(Path(directory)),
+                downloader=FakeDownloader(Path(directory) / "unused"),
+            )
+            body = b'{"id":"event-case","type":"webhook.test","data":{}}'
+            timestamp = str(int(time.time() * 1000))
+            headers = {
+                "x-mobilerun-timestamp": timestamp,
+                "x-mobilerun-signature": signature(body, timestamp),
+                "x-mobilerun-event-id": "event-case",
+                "x-mobilerun-event-type": "webhook.test",
+            }
+
+            status, result = app.handle(headers, body)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(result["eventId"], "event-case")
 
 
 if __name__ == "__main__":

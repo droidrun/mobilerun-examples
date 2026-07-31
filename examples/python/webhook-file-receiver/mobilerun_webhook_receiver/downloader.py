@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from contextlib import closing
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -90,9 +91,13 @@ class MobilerunFileDownloader:
         return canonical_file_id, filename, download_path, expected_size
 
     def _open_api_or_storage(self, download_path: str) -> httpx.Response:
+        # The SDK base URL already ends in /v1. Webhook downloadPath values are
+        # API-root paths that also start with /v1, so passing them through
+        # verbatim would request /v1/v1/agents/files/... and return 404.
+        sdk_path = download_path.removeprefix("/v1")
         try:
             response = self.sdk_client.get(
-                download_path,
+                sdk_path,
                 cast_to=httpx.Response,
                 options={
                     "headers": {"Accept": "application/octet-stream"},
@@ -101,6 +106,15 @@ class MobilerunFileDownloader:
                 stream=True,
             )
         except APIError as exc:
+            # Stainless raises for the intentional 302 to signed object
+            # storage before returning the raw httpx response. Preserve the
+            # redirect handling below without ever forwarding API auth.
+            error_response = getattr(exc, "response", None)
+            if (
+                isinstance(error_response, httpx.Response)
+                and error_response.status_code in REDIRECT_STATUSES
+            ):
+                return self._follow_storage_redirect(error_response)
             raise DownloadError("mobilerun file API request failed") from exc
 
         if response.status_code == HTTPStatus.OK:
@@ -198,6 +212,12 @@ class MobilerunFileDownloader:
     def _safe_filename(filename: str) -> str:
         if filename in {".", ".."} or Path(filename).name != filename:
             raise PayloadError("file.filename must not contain a path")
-        if "/" in filename or "\\" in filename or "\x00" in filename:
+        if (
+            "/" in filename
+            or "\\" in filename
+            or any(
+                ord(character) < 32 or ord(character) == 127 for character in filename
+            )
+        ):
             raise PayloadError("file.filename contains an unsafe character")
         return filename

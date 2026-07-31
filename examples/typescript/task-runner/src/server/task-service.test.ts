@@ -54,7 +54,6 @@ describe('task service', () => {
   test('starts a task and returns scoped stream credentials', async () => {
     const result = await createService().start({
       task: 'Open Settings',
-      llmModel: 'google/gemini-3.1-flash-lite',
       deviceId: DEVICE_ID,
       maxSteps: 30,
     });

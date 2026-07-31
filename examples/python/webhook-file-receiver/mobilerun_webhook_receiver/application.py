@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from .config import Config
 from .downloader import MobilerunFileDownloader
@@ -45,7 +46,7 @@ class WebhookApplication:
         if auth_error:
             return auth_error
 
-        event_id = headers.get(EVENT_ID_HEADER, "")
+        event_id = _header(headers, EVENT_ID_HEADER)
         event = self._parse_event(headers, raw_body, event_id)
         if isinstance(event, tuple):
             return event
@@ -64,8 +65,8 @@ class WebhookApplication:
         try:
             verify_signature(
                 raw_body,
-                headers.get(TIMESTAMP_HEADER, ""),
-                headers.get(SIGNATURE_HEADER, ""),
+                _header(headers, TIMESTAMP_HEADER),
+                _header(headers, SIGNATURE_HEADER),
                 self.config.webhook_secret,
                 max_age_ms=self.config.max_timestamp_age_ms,
             )
@@ -89,7 +90,7 @@ class WebhookApplication:
             return HTTPStatus.BAD_REQUEST, {"message": "event must be an object"}
         if event.get("id") != event_id:
             return HTTPStatus.BAD_REQUEST, {"message": "event id mismatch"}
-        event_type = headers.get(EVENT_TYPE_HEADER)
+        event_type = _header(headers, EVENT_TYPE_HEADER)
         if event_type and event.get("type") != event_type:
             return HTTPStatus.BAD_REQUEST, {"message": "event type mismatch"}
         return event
@@ -147,3 +148,12 @@ class WebhookApplication:
         if not isinstance(file_data, dict):
             raise PayloadError("event.data.file must be an object")
         return file_data
+
+
+def _header(headers: Mapping[str, str], name: str) -> str:
+    """Read an HTTP header without depending on its wire-case spelling."""
+    wanted = name.casefold()
+    for key, value in headers.items():
+        if key.casefold() == wanted:
+            return value
+    return ""

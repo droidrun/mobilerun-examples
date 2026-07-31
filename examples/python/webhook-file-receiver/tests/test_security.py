@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from support import NOW_MS, SECRET, signature
-
 from mobilerun_webhook_receiver.errors import PayloadError
 from mobilerun_webhook_receiver.security import verify_signature
+from support import NOW_MS, SECRET, signature
 
 
 class SignatureTests(unittest.TestCase):

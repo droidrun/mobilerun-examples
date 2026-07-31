@@ -58,6 +58,7 @@ describe('API contracts', () => {
       body: JSON.stringify({
         task: 'Open Settings',
         deviceId: DEVICE_ID,
+        maxSteps: 30,
         credentials: [{ packageName: 'example', credentialNames: ['password'] }],
       }),
     });

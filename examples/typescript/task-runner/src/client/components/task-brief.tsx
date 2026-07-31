@@ -36,7 +36,6 @@ export function TaskBrief({ state, run, cancel, reset }: TaskBriefProps) {
     event.preventDefault();
     void run({
       task,
-      llmModel: 'google/gemini-3.1-flash-lite',
       deviceId,
       maxSteps,
     });
