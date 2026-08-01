@@ -1,0 +1,20 @@
+[project]
+name = "mobilerun-examples"
+version = "0.1.0"
+description = "Runnable integration examples for mobilerun"
+requires-python = ">=3.11"
+dependencies = ["mobilerun-sdk>=5.1.0,<6"]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-cov>=5.0,<7",
+    "ruff>=0.9,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["examples/python/webhook-file-receiver/tests"]
+pythonpath = ["examples/python/webhook-file-receiver"]

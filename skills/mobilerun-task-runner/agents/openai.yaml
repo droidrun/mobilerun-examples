@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobilerun Task Runner"
+  short_description: "Build secure TypeScript task runners"
+  default_prompt: "Use $mobilerun-task-runner to build and test a server-side Mobilerun task runner with a live device stream."

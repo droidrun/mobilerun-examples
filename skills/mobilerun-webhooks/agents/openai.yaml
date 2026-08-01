@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobilerun Webhooks"
+  short_description: "Build secure Python webhook receivers"
+  default_prompt: "Use $mobilerun-webhooks to build and test a signed Python webhook receiver with secure file downloads."
