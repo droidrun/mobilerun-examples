@@ -104,6 +104,9 @@ skills/
   [on npm](https://www.npmjs.com/package/@mobilerun/react).
 - [`mobilerun`](https://github.com/droidrun/mobilerun) — the open-source mobile
   automation framework.
+- [`mobilerun-framework-examples`](https://github.com/droidrun/mobilerun-framework-examples) —
+  agentic workflow examples (LinkedIn scraping, social posting, games) for the
+  open-source framework — formerly hosted under this repository name.
 
 ## License
 
