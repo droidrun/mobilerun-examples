@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@mobilerun/react": "^0.1.0",
-    "@mobilerun/sdk": "^5.1.0",
+    "@mobilerun/sdk": "^6.0.1",
     "hono": "^4.12.27",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
