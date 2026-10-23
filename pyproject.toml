@@ -3,7 +3,7 @@ name = "mobilerun-examples"
 version = "0.1.0"
 description = "Runnable integration examples for mobilerun"
 requires-python = ">=3.11"
-dependencies = ["mobilerun-sdk>=5.1.0,<6"]
+dependencies = ["mobilerun-sdk>=6.0.1,<7"]
 
 [tool.uv]
 package = false

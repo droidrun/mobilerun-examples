@@ -6,7 +6,7 @@
       "name": "mobilerun-task-runner-example",
       "dependencies": {
         "@mobilerun/react": "^0.1.0",
-        "@mobilerun/sdk": "^5.1.0",
+        "@mobilerun/sdk": "^6.0.1",
         "hono": "^4.12.27",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -23,7 +23,7 @@
   "packages": {
     "@mobilerun/react": ["@mobilerun/react@0.1.0", "", { "dependencies": { "@radix-ui/react-slot": "^1.2.3", "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "lucide-react": "^0.553.0", "tailwind-merge": "^3.2.0" }, "peerDependencies": { "@mobilerun/sdk": ">=2.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" } }, "sha512-cIfstMZUcAs1TylbRR4l0LbRIHnXgkdEpG6yQ2Ue7zKOUjLZBKQSCA1nOBiXzfkn87MmszCvNhNVbpd4S4Re7A=="],
 
-    "@mobilerun/sdk": ["@mobilerun/sdk@5.1.0", "", {}, "sha512-z+LXTSoMFZcuzBFu0j2/RRJpUZJgCNMcvzXrs66zuP7yFzE5kAtYeZiiLRa4QAq7JP3Adi8w4dpR1yy27oBX4g=="],
+    "@mobilerun/sdk": ["@mobilerun/sdk@6.0.1", "", {}, "sha512-2nb6fnxnBOsM2pPJFaLWkQ1MJl2ovKx6Lk9owTh/V30LR8fjYLJqWtB8yVAiJ6e2PtFU1Se/MQ+FAcRWEs34Kw=="],
 
     "@radix-ui/react-compose-refs": ["@radix-ui/react-compose-refs@1.1.5", "", { "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-+48PbAAbq3didjJxa+OaWY2ZwgAKsNiRGyeHKszblZMQ+kcpd9pAaT11cMkGEie0vsOi3QdeTE6d5Fe3Gn61kA=="],
 
