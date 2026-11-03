@@ -20,7 +20,7 @@
 <a href="https://github.com/droidrun/mobilerun-react">📱 @mobilerun/react</a>
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776ab?logo=python&logoColor=white&style=flat-square)](https://www.python.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white&style=flat-square)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178c6?logo=typescript&logoColor=white&style=flat-square)](https://www.typescriptlang.org/)
 [![Discord](https://img.shields.io/discord/1360219330318696488?color=white&label=Discord&logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZZbKEZZkwK)
 
 </div>
