@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
 | Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
-| TypeScript | [Branded assistant](examples/typescript/branded-assistant/) | A white-label travel assistant: persona, live progress, follow-up questions, result cards, and a per-user credit ledger |
+| TypeScript | [Branded assistant](examples/typescript/branded-assistant/) | A white-label travel assistant: persona, step progress, notes to the assistant, validated result cards, and a per-user credit ledger |
 
 Each example is self-contained, runnable, and documents the decisions you
 should revisit before taking it to production.
