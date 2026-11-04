@@ -230,6 +230,10 @@ describe('device lifecycle', () => {
     expect(rejected.status).toBe(422);
     const message = 'Device type unavailable.';
     expect(await rejected.json()).toEqual({ error: 'upstream_rejected', message });
+    sdk.createFailure = upstream(402, { title: 'Insufficient balance' });
+    expect((await (await call('POST', '/api/device', cookie)).json()).message).toBe(
+      'Insufficient balance',
+    );
 
     for (const status of [401, 503]) {
       sdk.createFailure = upstream(status, { message: 'bad key' });

@@ -44,7 +44,7 @@ function toError(error: unknown): { status: ContentfulStatusCode; body: ErrorBod
   if (status >= 500 || status === 401 || status === 403) {
     return { status: 502, body: { error: 'upstream_error', message: SOMETHING_WRONG } };
   }
-  const text = [body?.message, body?.detail].find((v) => typeof v === 'string' && v);
+  const text = [body?.message, body?.detail, body?.title].find((v) => typeof v === 'string' && v);
   const message = typeof text === 'string' ? text : SOMETHING_WRONG;
   return { status: status as ContentfulStatusCode, body: { error: 'upstream_rejected', message } };
 }

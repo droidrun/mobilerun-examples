@@ -63,6 +63,7 @@ export function usePortal() {
   const [device, setDevice] = useState<DeviceView | null>(); // undefined: not loaded yet
   const [deleted, setDeleted] = useState(false);
   const [screen, setScreen] = useState<Screen>();
+  const [healed, setHealed] = useState(0); // counts stream reconnects; each asks again
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
@@ -97,8 +98,6 @@ export function usePortal() {
           setDevice(null);
           return 'ok';
         }
-        // A failed first load still shows a screen, with the notice.
-        setDevice((now) => (now === undefined ? null : now));
         fail(error);
         return 'failed';
       }
@@ -134,9 +133,6 @@ export function usePortal() {
           showDevice(null);
           setDeleted(true);
         }),
-      /** The stream is reconnecting: its credentials may have changed. */
-      refreshStream: () =>
-        api<StreamView>('GET', '/api/device/stream').then((stream) => setScreen({ stream }), () => {}),
     };
   });
 
@@ -152,7 +148,8 @@ export function usePortal() {
   }, []);
 
   // Load the phone, then poll while it moves between states. Polls run one at a time, the
-  // next after every attempt, failed or not, and back off while they fail.
+  // next after every attempt, failed or not, and back off while they fail; a failed first
+  // load is retried the same way.
   const state = device?.state;
   const noDevice = device === null;
   useEffect(() => {
@@ -161,8 +158,9 @@ export function usePortal() {
     return serially(POLL, poll, state ? POLL.every : 0);
   }, [email, noDevice, state, actions]);
 
-  // The server decides whether the phone can stream. Ask on every state change and retry with
-  // backoff until it hands out credentials; 409 means "not streaming (yet)".
+  // The server decides whether the phone can stream. Ask on every state change and after every
+  // reconnect, and retry with backoff until it hands out credentials; 409 means "not streaming
+  // (yet)". Signing out or a new state cancels the loop, so a late answer is dropped.
   useEffect(() => {
     if (!email || !state) {
       setScreen(undefined);
@@ -187,7 +185,7 @@ export function usePortal() {
       },
       0,
     );
-  }, [email, state]);
+  }, [email, state, healed]);
 
   return {
     email,
@@ -198,6 +196,8 @@ export function usePortal() {
     pending,
     notice,
     ...actions,
+    /** The stream is reconnecting: its credentials may have changed. */
+    refreshStream: () => setHealed((count) => count + 1),
   };
 }
 
