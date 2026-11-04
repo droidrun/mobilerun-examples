@@ -22,11 +22,13 @@ session lifecycle when adapting it.
    `MOBILERUN_CLOUD_API_KEY` on the server.
 3. Every SDK call and the session lifecycle live in
    `src/server/session-service.ts`; sessions persist in
-   `src/server/session-store.ts` (SQLite). Tests fake the SDK client.
+   `src/server/session-store.ts` (SQLite); the environment is read in
+   `src/server/config.ts`; `src/server/api-app.ts` holds the routes and the one
+   error mapping. Tests fake the SDK client.
 4. To rebrand, edit `brand.json` (company, product, tagline, `#rrggbb` accent,
    24×24 SVG logo path). `src/client/theme.css`, `src/client/brand.ts` and
-   `src/client/components/{app-shell,phone-frame}.tsx` are shared verbatim with
-   the other white-label examples; keep them generic and put page-specific
+   `src/client/components/` (app shell, notice, phone frame) are shared verbatim
+   with the other white-label examples; keep them generic and put page-specific
    styles in `src/styles.css`. To lock to another app, set `DEMO_APP_PACKAGE`;
    the app must already be installed on the phone.
 5. For offline work, run `bun run check` (tests, typecheck, build). Do not
@@ -37,9 +39,10 @@ session lifecycle when adapting it.
 ## Required boundaries
 
 - Use `deviceType: 'android_cloud_phone'` and create with `maxRetries: 0`.
-  Keep the API's HTTP status for its errors but show visitors a plain message,
-  not upstream text; say "busy" only for the example's own capacity and rate
-  limits. Add no client-side gates for quotas or capabilities.
+  Keep the API's status and text for its 4xx errors, and turn a `401`/`403` or
+  5xx into a plain `502`. The page shows visitors its own plain line and says
+  "busy" only for the example's own capacity and rate limits. Add no
+  client-side gates for quotas or capabilities. Keep `hono/csrf` on `/api/*`.
 - Start the app before enabling kiosk: lock-task mode needs a running task of
   the package. Retry kiosk briefly while the API says "no task found".
 - The browser receives `streamUrl` and `streamToken` only for the session its
@@ -54,7 +57,7 @@ session lifecycle when adapting it.
 - Keep Mobilerun branding out of the end-user page. Never print or log the API
   key.
 - Before production: replace the anonymous cookie with real authentication or a
-  bot check, use a shared persistent store and limiter for multiple replicas, and
-  alert on phones that fail to terminate.
+  bot check, set `SESSION_SECRET`, use a shared persistent store and limiter for
+  multiple replicas, and alert on phones that fail to terminate.
 
 After changes, run `bun run check` from the example directory.
