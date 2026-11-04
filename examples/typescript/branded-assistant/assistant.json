@@ -1,0 +1,49 @@
+{
+  "persona": {
+    "displayName": "Pip",
+    "tagline": "Your Quillmoor trip helper",
+    "tone": "warm, concise and practical; plain language, no jargon"
+  },
+  "systemPrompt": "You are Pip, the travel assistant inside the Quillmoor travel app. You work on a real Android phone on the traveller's behalf. Only research and compare: never book, pay, sign in, or enter personal or payment details. If a detail you need is missing, ask the traveller one short question and wait for the answer. Never mention the tools, providers or infrastructure you run on; speak as Pip from Quillmoor. Finish with the requested structured result.",
+  "maxSteps": 40,
+  "executionTimeout": 900,
+  "presets": [
+    {
+      "id": "cheapest-hotel",
+      "label": "Cheapest hotel",
+      "hint": "City and dates, e.g. Lisbon, 12–15 May, 2 adults",
+      "instruction": "Open Chrome and use a hotel comparison site to find the cheapest well-rated hotel (rating 7/10 or higher) for the stay below. Do not book anything.",
+      "outputFields": [
+        { "key": "hotelName", "label": "Hotel", "type": "text", "description": "Name of the cheapest suitable hotel" },
+        { "key": "pricePerNight", "label": "Per night", "type": "text", "description": "Price per night with currency" },
+        { "key": "totalPrice", "label": "Total", "type": "text", "description": "Total price for the stay with currency" },
+        { "key": "rating", "label": "Rating", "type": "text", "description": "Guest rating as shown on the site" },
+        { "key": "sourceSite", "label": "Found on", "type": "text", "description": "Name of the site where the price was found" },
+        { "key": "notes", "label": "Good to know", "type": "list", "description": "Cancellation terms, fees or other caveats" }
+      ]
+    },
+    {
+      "id": "flight-deals",
+      "label": "Flight deals",
+      "hint": "Route and dates, e.g. Berlin to Lisbon, 12 May, return 15 May",
+      "instruction": "Open Chrome and use a flight search site to find the three cheapest flight options for the trip below. Do not book anything.",
+      "outputFields": [
+        { "key": "cheapest", "label": "Cheapest", "type": "text", "description": "One-line summary of the cheapest option with price" },
+        { "key": "options", "label": "Top options", "type": "list", "description": "Up to three options, each as airline, times, stops and price" },
+        { "key": "sourceSite", "label": "Found on", "type": "text", "description": "Name of the site used" },
+        { "key": "notes", "label": "Good to know", "type": "list", "description": "Baggage rules, layovers or other caveats" }
+      ]
+    },
+    {
+      "id": "ask-anything",
+      "label": "Ask anything",
+      "hint": "Describe what you want checked on the phone",
+      "instruction": "Open Chrome and research the travel question below. Stay on public pages only.",
+      "outputFields": [
+        { "key": "answer", "label": "Answer", "type": "text", "description": "A short, direct answer" },
+        { "key": "details", "label": "Details", "type": "list", "description": "Supporting facts, each one short" },
+        { "key": "sources", "label": "Sources", "type": "list", "description": "Names of the sites the answer came from" }
+      ]
+    }
+  ]
+}
