@@ -1,294 +1,188 @@
+import type Mobilerun from '@mobilerun/sdk';
 import type { SessionView, StreamView } from '@/shared/contracts';
-import type { CloseReason, SessionStore } from './session-store';
+import type { SessionStore } from './session-store';
 
-/** The device operations the demo needs. The only SDK-facing seam. */
-export type DemoDeviceDeps = {
-  createDevice: (input: { name: string }) => Promise<{ deviceId: string }>;
-  waitReady: (
-    deviceId: string,
-    options: { timeoutMs: number; signal: AbortSignal },
-  ) => Promise<void>;
-  enableKiosk: (deviceId: string, packageName: string) => Promise<void>;
-  startApp: (deviceId: string, packageName: string) => Promise<void>;
-  retrieveStream: (deviceId: string) => Promise<StreamView>;
-  terminate: (deviceId: string) => Promise<void>;
-};
+const KIOSK_RETRIES = 5;
+const KIOSK_RETRY_DELAY_MS = 1_000;
 
+/** A refusal of this server's own, with an HTTP status and text a visitor may read. */
 export class DemoError extends Error {
-  readonly code: string;
-  readonly status: number;
-  readonly headers: Record<string, string>;
-
-  constructor(
-    code: string,
-    status: number,
-    message: string,
-    headers: Record<string, string> = {},
-  ) {
+  constructor(readonly code: string, readonly status: number, message: string) {
     super(message);
-    this.name = 'DemoError';
-    this.code = code;
-    this.status = status;
-    this.headers = headers;
   }
 }
 
-export interface SessionService {
-  /** The visitor's running demo, if any. */
-  current: (visitorId: string) => SessionView | undefined;
-  start: (visitorId: string) => Promise<SessionView>;
-  stream: (sessionId: string, visitorId: string) => Promise<StreamView>;
-  end: (sessionId: string, visitorId: string) => Promise<void>;
-  /** Terminates expired sessions and retries owed terminates. Safe on a timer. */
-  reap: () => Promise<void>;
-  /** Stops new starts, then terminates every open session. */
-  shutdown: () => Promise<void>;
-}
+const notFound = () => new DemoError('not_found', 404, 'Demo session not found.');
+const restarting = () =>
+  new DemoError('shutting_down', 503, 'The demo is restarting. Try again in a moment.');
+const stillStarting = () =>
+  new DemoError('session_provisioning', 409, 'Your demo is still starting.');
+const isGone = (error: unknown) => (error as { status?: unknown } | null)?.status === 404;
+const noTaskYet = (error: unknown) =>
+  error instanceof Error && /no task found/i.test(error.message);
+const logOwed = (id: string) => (error: unknown) =>
+  console.error(`terminate owed for session ${id}; the reaper retries it`, error);
 
-type SessionServiceOptions = {
-  deps: DemoDeviceDeps;
+type Options = {
+  client: Mobilerun;
   store: SessionStore;
   appPackage: string;
   ttlMs: number;
   provisionTimeoutMs: number;
   maxConcurrent: number;
+  /** Seams for tests. */
   now?: () => number;
   newId?: () => string;
+  sleep?: (ms: number) => Promise<void>;
 };
 
-function isGone(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'status' in error &&
-    error.status === 404
-  );
-}
+export type SessionService = ReturnType<typeof createSessionService>;
 
-export function createSessionService({
-  deps,
-  store,
-  appPackage,
-  ttlMs,
-  provisionTimeoutMs,
-  maxConcurrent,
-  now = Date.now,
-  newId = () => crypto.randomUUID(),
-}: SessionServiceOptions): SessionService {
-  const abort = new AbortController();
+/** The demo lifecycle, and every @mobilerun/sdk call this example makes. */
+export function createSessionService(options: Options) {
+  const { client, store, appPackage, ttlMs, provisionTimeoutMs, maxConcurrent } = options;
+  const { now = Date.now, newId = () => crypto.randomUUID(), sleep = Bun.sleep } = options;
+  const { devices } = client;
+  const abort = new AbortController(); // interrupts phones still booting at shutdown
   const starts = new Map<string, Promise<void>>();
-  const terminations = new Map<string, Promise<void>>();
+  const closing = new Map<string, Promise<void>>();
   let shuttingDown = false;
-  let reaping = false;
 
-  const view = (id: string, expiresAt: number): SessionView => ({
-    id,
-    expiresInSeconds: Math.max(0, Math.round((expiresAt - now()) / 1_000)),
-  });
-
-  const owned = (sessionId: string, visitorId: string) => {
-    const record = store.get(sessionId);
-    if (!record || record.visitorId !== visitorId) {
-      throw new DemoError('not_found', 404, 'Demo session not found.');
-    }
-    return record;
+  const owned = (id: string, visitorId: string) => {
+    const row = store.get(id);
+    if (row?.visitorId !== visitorId) throw notFound();
+    return row;
   };
 
   /**
-   * Terminates the session's device and only then marks the row ended. A
-   * failed terminate leaves the row `ending`, so it keeps its slot and the
-   * reaper retries it. A device that is already gone (404) counts as done.
+   * The one cleanup path. The row is ended only once the phone is gone (a 404 counts as gone);
+   * a failed terminate leaves it `ending`, holding its slot, for the reaper to retry.
    */
-  const terminateDevice = async (
-    id: string,
-    reason: CloseReason,
-  ): Promise<void> => {
-    const record = store.get(id);
-    if (!record || record.state === 'ended') return;
-    store.update(id, { state: 'ending', endReason: record.endReason ?? reason });
-    if (record.deviceId) {
-      try {
-        await deps.terminate(record.deviceId);
-      } catch (error) {
+  const terminate = async (id: string) => {
+    const row = store.get(id);
+    if (!row || row.state === 'ended') return;
+    store.update(id, { state: 'ending' });
+    if (row.deviceId) {
+      await devices.terminate(row.deviceId).catch((error: unknown) => {
         if (!isGone(error)) throw error;
-      }
+      });
     }
     store.update(id, { state: 'ended' });
   };
 
   /**
-   * The one close path for end, reap and shutdown. Concurrent callers share one
-   * pending promise. A session that is still booting is only marked `ending`;
-   * its start flow owns the device it is about to receive and terminates it.
+   * End, reap and shutdown close through here and share one promise per session. A session
+   * still booting is only marked `ending`: its start flow terminates the phone when it arrives.
    */
-  const close = (id: string, reason: CloseReason): Promise<void> => {
-    const pending = terminations.get(id);
+  const close = (id: string): Promise<void> => {
+    const pending = closing.get(id);
     if (pending) return pending;
     const run = (async () => {
       const booting = starts.get(id);
       if (booting) {
-        const record = store.get(id);
-        if (record?.state === 'provisioning') {
-          store.update(id, { state: 'ending', endReason: reason });
-        }
+        if (store.get(id)?.state === 'provisioning') store.update(id, { state: 'ending' });
         await booting.catch(() => {});
       }
-      await terminateDevice(id, reason);
-    })().finally(() => terminations.delete(id));
-    terminations.set(id, run);
+      await terminate(id);
+    })().finally(() => closing.delete(id));
+    closing.set(id, run);
     return run;
   };
 
-  const assertStarting = (id: string) => {
-    if (shuttingDown) {
-      throw new DemoError(
-        'shutting_down',
-        503,
-        'The demo is restarting. Try again in a moment.',
-      );
-    }
+  /** Throws once the session was closed while booting: its device is terminated, never promoted. */
+  const stillWanted = (id: string) => {
+    if (shuttingDown) throw restarting();
     if (store.get(id)?.state !== 'provisioning') {
-      throw new DemoError(
-        'session_closed',
-        410,
-        'The demo ended before it was ready.',
-      );
+      throw new DemoError('session_closed', 410, 'The demo ended before it was ready.');
     }
   };
 
-  const provision = async (id: string): Promise<void> => {
+  /** Kiosk pins a running task, which can lag behind apps.start: retry while it is missing. */
+  const enableKiosk = async (deviceId: string) => {
+    for (let retry = 0; ; retry += 1) {
+      try {
+        // SDK retries are off so this loop is the only one.
+        return await devices.kiosk.enable(deviceId, { packageName: appPackage }, { maxRetries: 0 });
+      } catch (error) {
+        if (!noTaskYet(error) || retry >= KIOSK_RETRIES) throw error;
+        await sleep(KIOSK_RETRY_DELAY_MS);
+      }
+    }
+  };
+
+  const provision = async (id: string) => {
     try {
-      const { deviceId } = await deps.createDevice({ name: `demo-${id}` });
-      store.update(id, { deviceId });
-      assertStarting(id);
-      await deps.waitReady(deviceId, {
-        timeoutMs: provisionTimeoutMs,
-        signal: abort.signal,
-      });
-      assertStarting(id);
-      // The app starts first: Android lock-task (kiosk) mode pins an app that
-      // already has a running task, and enabling it for a package with no task
-      // fails with "no task found".
-      await deps.startApp(deviceId, appPackage);
-      assertStarting(id);
-      await deps.enableKiosk(deviceId, appPackage);
-      assertStarting(id);
+      // No automatic retries: a retried create could leave a second, untracked phone.
+      const device = await devices.create(
+        { deviceType: 'android_cloud_phone', name: `demo-${id}` },
+        { maxRetries: 0 },
+      );
+      store.update(id, { deviceId: device.id });
+      stillWanted(id);
+      await devices.waitReady(device.id, { timeout: provisionTimeoutMs, signal: abort.signal });
+      stillWanted(id);
+      await devices.apps.start(appPackage, { deviceId: device.id }); // app first, then kiosk
+      stillWanted(id);
+      await enableKiosk(device.id);
+      stillWanted(id);
       store.update(id, { state: 'live', expiresAt: now() + ttlMs });
     } catch (error) {
-      // Includes a device that arrived after the session was already closed.
-      await terminateDevice(id, 'failed').catch((cleanupError: unknown) => {
-        console.error(`cleanup owed for session ${id}`, cleanupError);
-      });
+      await terminate(id).catch(logOwed(id));
       throw error;
     }
   };
 
   return {
-    current(visitorId) {
-      const record = store.findActiveByVisitor(visitorId);
-      return record?.state === 'live' && record.expiresAt > now()
-        ? view(record.id, record.expiresAt)
-        : undefined;
+    /** The visitor's running demo, if any. */
+    current(visitorId: string): SessionView | undefined {
+      const row = store.activeFor(visitorId);
+      if (row?.state !== 'live' || row.expiresAt <= now()) return undefined;
+      return { id: row.id, expiresInSeconds: Math.round((row.expiresAt - now()) / 1_000) };
     },
 
-    async start(visitorId) {
-      if (shuttingDown) {
-        throw new DemoError(
-          'shutting_down',
-          503,
-          'The demo is restarting. Try again in a moment.',
-        );
+    async start(visitorId: string): Promise<SessionView> {
+      if (shuttingDown) throw restarting();
+      if (store.activeFor(visitorId)?.state === 'provisioning') throw stillStarting();
+      if (store.open().length >= maxConcurrent) {
+        throw new DemoError('capacity_reached', 503, 'All demo phones are busy. Try again soon.');
       }
-      if (store.findActiveByVisitor(visitorId)?.state === 'provisioning') {
-        throw new DemoError(
-          'session_provisioning',
-          409,
-          'Your demo is still starting.',
-        );
-      }
-      if (store.countOpen() >= maxConcurrent) {
-        throw new DemoError(
-          'capacity_reached',
-          503,
-          'All demo phones are busy. Try again in a few minutes.',
-        );
-      }
-
       const id = newId();
-      const createdAt = now();
-      store.insert({
-        id,
-        visitorId,
-        deviceId: null,
-        state: 'provisioning',
-        createdAt,
-        // A stuck start is swept once it could no longer be booting.
-        expiresAt: createdAt + provisionTimeoutMs + ttlMs,
-        endReason: null,
-      });
-
+      // A start that hangs is swept once it can no longer be booting.
+      const expiresAt = now() + provisionTimeoutMs + ttlMs;
+      store.insert({ id, visitorId, deviceId: null, state: 'provisioning', expiresAt });
       const work = provision(id);
       starts.set(id, work);
-      try {
-        await work;
-      } finally {
-        starts.delete(id);
-      }
-      return view(id, now() + ttlMs);
+      await work.finally(() => starts.delete(id));
+      return { id, expiresInSeconds: ttlMs / 1_000 };
     },
 
-    async stream(sessionId, visitorId) {
-      const record = owned(sessionId, visitorId);
-      if (record.state === 'provisioning') {
-        throw new DemoError(
-          'session_provisioning',
-          409,
-          'Your demo is still starting.',
-        );
-      }
-      if (
-        record.state !== 'live' ||
-        record.expiresAt <= now() ||
-        !record.deviceId
-      ) {
+    async stream(id: string, visitorId: string): Promise<StreamView> {
+      const row = owned(id, visitorId);
+      if (row.state === 'provisioning') throw stillStarting();
+      if (row.state !== 'live' || row.expiresAt <= now() || !row.deviceId) {
         throw new DemoError('session_ended', 410, 'This demo has ended.');
       }
-      return deps.retrieveStream(record.deviceId);
+      const device = await devices.retrieve(row.deviceId);
+      return { streamUrl: device.streamUrl, streamToken: device.streamToken ?? undefined };
     },
 
-    async end(sessionId, visitorId) {
-      const record = owned(sessionId, visitorId);
-      if (record.state !== 'ended') await close(record.id, 'user');
+    async end(id: string, visitorId: string) {
+      if (owned(id, visitorId).state !== 'ended') await close(id);
     },
 
+    /** Closes expired sessions and retries owed terminates. Overlapping runs share each close. */
     async reap() {
-      if (reaping) return;
-      reaping = true;
-      try {
-        for (const record of store.listOpen()) {
-          if (record.state !== 'ending' && record.expiresAt > now()) continue;
-          try {
-            await close(record.id, 'expired');
-          } catch (error) {
-            console.error(`terminate failed for session ${record.id}`, error);
-          }
-        }
-      } finally {
-        reaping = false;
+      for (const row of store.open()) {
+        if (row.state !== 'ending' && row.expiresAt > now()) continue;
+        await close(row.id).catch(logOwed(row.id));
       }
     },
 
+    /** Refuses new starts, interrupts phones still booting, then closes every open session. */
     async shutdown() {
       shuttingDown = true;
       abort.abort();
-      await Promise.allSettled([...starts.values()]);
-      for (const record of store.listOpen()) {
-        try {
-          await close(record.id, 'shutdown');
-        } catch (error) {
-          console.error(`terminate failed for session ${record.id}`, error);
-        }
-      }
+      await Promise.all(store.open().map((row) => close(row.id).catch(logOwed(row.id))));
     },
   };
 }

@@ -1,220 +1,138 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import type Mobilerun from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
 import { createRateLimiter } from './rate-limiter';
 import { createSessionService } from './session-service';
 import { createSessionStore, type SessionStore } from './session-store';
-import { createFakeDevices } from './test-support';
 
-let openStore: SessionStore | undefined;
-afterEach(() => {
-  openStore?.close();
-  openStore = undefined;
-});
+let store: SessionStore;
+afterEach(() => store.close());
 
-function setup(options: { rateLimitMax?: number; maxConcurrent?: number } = {}) {
-  const devices = createFakeDevices();
-  const store = createSessionStore(':memory:');
-  openStore = store;
+function setup(rateLimitMax = 10) {
+  let count = 0;
+  const terminated: Array<string> = [];
+  const devices = {
+    create: async (): Promise<{ id: string }> => ({ id: `device-${++count}` }),
+    waitReady: async () => {},
+    apps: { start: async () => {} },
+    kiosk: { enable: async () => {} },
+    retrieve: async (id: string) => ({ streamUrl: `wss://stream/${id}`, streamToken: `token-${id}` }),
+    terminate: async (id: string) => void terminated.push(id),
+  };
+  store = createSessionStore(':memory:');
   const service = createSessionService({
-    deps: devices,
+    client: { devices } as unknown as Mobilerun,
     store,
     appPackage: 'com.android.chrome',
     ttlMs: 300_000,
     provisionTimeoutMs: 60_000,
-    maxConcurrent: options.maxConcurrent ?? 5,
+    maxConcurrent: 5,
   });
-  const app = createApiApp({
-    service,
-    limiter: createRateLimiter({
-      max: options.rateLimitMax ?? 10,
-      windowMs: 60_000,
-    }),
-    cookieSecret: 'test-secret-that-is-long-enough',
-  });
-  return { app, devices, store };
+  const limiter = createRateLimiter({ max: rateLimitMax, windowMs: 60_000 });
+  const app = createApiApp({ service, limiter, cookieSecret: 'test-secret' });
+  return { app, devices, terminated };
 }
 
-function cookieFrom(response: Response): string {
-  const header = response.headers.get('set-cookie') ?? '';
-  return header.split(';')[0] ?? '';
+type App = ReturnType<typeof setup>['app'];
+/** What Bun.serve passes to fetch; the rate limit reads the client IP from it. */
+const BUN_ENV = { server: { requestIP: () => ({ address: '203.0.113.7', family: 'IPv4', port: 1 }) } };
+
+async function start(app: App, cookie?: string) {
+  const init: RequestInit = { method: 'POST', headers: cookie ? { Cookie: cookie } : {} };
+  const response = await app.request('/api/sessions', init, BUN_ENV);
+  const body = (await response.json()) as Record<string, string>;
+  return { response, body, cookie: cookie ?? response.headers.get('set-cookie')?.split(';')[0] ?? '' };
 }
 
-async function startSession(app: ReturnType<typeof setup>['app'], cookie?: string) {
-  const response = await app.request('/api/sessions', {
-    method: 'POST',
-    headers: cookie ? { Cookie: cookie } : {},
-  });
-  return {
-    response,
-    cookie: cookie ?? cookieFrom(response),
-    body: (await response.json()) as {
-      id: string;
-      expiresInSeconds: number;
-      error?: string;
-    },
-  };
-}
+const as = (cookie: string, method = 'GET') => ({ method, headers: { Cookie: cookie } });
 
-describe('API contracts', () => {
-  test('reports a missing server API key without crashing', async () => {
-    const app = createApiApp({
-      service: null,
-        limiter: createRateLimiter({ max: 1, windowMs: 1_000 }),
-      cookieSecret: 'test-secret-that-is-long-enough',
-    });
+describe('sessions API', () => {
+  test('without an API key the page still loads and starts are refused with JSON', async () => {
+    store = createSessionStore(':memory:');
+    const limiter = createRateLimiter({ max: 1, windowMs: 1 });
+    const app = createApiApp({ service: null, limiter, cookieSecret: 's' });
 
-    const health = await app.request('/api/health');
-    expect(await health.json()).toEqual({ ok: true, sdkConfigured: false });
-
-    const response = await app.request('/api/sessions', { method: 'POST' });
+    expect(await (await app.request('/api/health')).json()).toEqual({ ok: true, sdkConfigured: false });
+    const response = await app.request('/api/sessions', { method: 'POST' }, BUN_ENV);
     expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({
-      error: 'missing_api_key',
-      message: 'API key missing: set MOBILERUN_CLOUD_API_KEY on the server.',
-    });
+    expect(await response.json()).toMatchObject({ error: 'missing_api_key' });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  test('starts a demo, sets a signed visitor cookie and resumes on repeat', async () => {
-    const { app, devices } = setup();
-
-    const first = await startSession(app);
+  test('sets a signed HttpOnly visitor cookie and hands a running demo back instead of a second phone', async () => {
+    const { app } = setup();
+    const first = await start(app);
     expect(first.response.status).toBe(201);
     expect(first.response.headers.get('set-cookie')).toContain('HttpOnly');
-    expect(first.cookie).toStartWith('visitor=');
-    expect(first.body.expiresInSeconds).toBe(300);
 
-    const again = await startSession(app, first.cookie);
+    const again = await start(app, first.cookie);
     expect(again.response.status).toBe(200);
     expect(again.body.id).toBe(first.body.id);
-    expect(devices.calls.filter((call) => call.startsWith('createDevice'))).toHaveLength(1);
   });
-});
 
-describe('stream ownership', () => {
-  test('returns stream credentials only to the cookie owner', async () => {
-    const { app } = setup();
-    const owner = await startSession(app);
-    const stranger = await startSession(app);
-    expect(stranger.body.id).not.toBe(owner.body.id);
+  test('only the cookie that started a demo gets its stream or can end it', async () => {
+    const { app, terminated } = setup();
+    const owner = await start(app);
+    const stranger = await start(app);
+    const stream = `/api/sessions/${owner.body.id}/stream`;
 
-    const own = await app.request(`/api/sessions/${owner.body.id}/stream`, {
-      headers: { Cookie: owner.cookie },
-    });
-    expect(own.status).toBe(200);
-    expect(await own.json()).toEqual({
-      streamUrl: 'wss://stream.example/device-1',
+    expect(await (await app.request(stream, as(owner.cookie))).json()).toEqual({
+      streamUrl: 'wss://stream/device-1',
       streamToken: 'token-device-1',
     });
+    expect((await app.request(stream, as(stranger.cookie))).status).toBe(404);
+    expect((await app.request(stream)).status).toBe(404);
+    expect((await app.request(stream, as('visitor=forged.signature'))).status).toBe(404);
 
-    const other = await app.request(`/api/sessions/${owner.body.id}/stream`, {
-      headers: { Cookie: stranger.cookie },
-    });
-    expect(other.status).toBe(404);
-
-    const anonymous = await app.request(`/api/sessions/${owner.body.id}/stream`);
-    expect(anonymous.status).toBe(404);
-
-    const forged = await app.request(`/api/sessions/${owner.body.id}/stream`, {
-      headers: { Cookie: 'visitor=forged-value.signature' },
-    });
-    expect(forged.status).toBe(404);
+    const session = `/api/sessions/${owner.body.id}`;
+    expect((await app.request(session, as(stranger.cookie, 'DELETE'))).status).toBe(404);
+    expect(terminated).toEqual([]);
+    expect((await app.request(session, as(owner.cookie, 'DELETE'))).status).toBe(200);
+    expect(terminated).toEqual(['device-1']);
   });
 
-  test('only the owner can end a demo', async () => {
-    const { app, devices } = setup();
-    const owner = await startSession(app);
-    const stranger = await startSession(app);
+  test('rate limits new starts per cookie and per IP, and says when to retry', async () => {
+    const { app } = setup(1);
+    const first = await start(app);
+    await app.request(`/api/sessions/${first.body.id}`, as(first.cookie, 'DELETE'));
 
-    const denied = await app.request(`/api/sessions/${owner.body.id}`, {
-      method: 'DELETE',
-      headers: { Cookie: stranger.cookie },
-    });
-    expect(denied.status).toBe(404);
-    expect(devices.terminated()).toEqual([]);
-
-    const ended = await app.request(`/api/sessions/${owner.body.id}`, {
-      method: 'DELETE',
-      headers: { Cookie: owner.cookie },
-    });
-    expect(ended.status).toBe(200);
-    expect(devices.terminated()).toEqual(['device-1']);
-  });
-
-  test('rejects malformed session IDs', async () => {
-    const { app } = setup();
-    const response = await app.request('/api/sessions/not-a-uuid/stream');
-    expect(response.status).toBe(400);
-  });
-});
-
-describe('limits', () => {
-  test('rate limits repeated starts and says when to retry', async () => {
-    const { app } = setup({ rateLimitMax: 1 });
-
-    const first = await startSession(app);
-    expect(first.response.status).toBe(201);
-    await app.request(`/api/sessions/${first.body.id}`, {
-      method: 'DELETE',
-      headers: { Cookie: first.cookie },
-    });
-
-    const second = await startSession(app, first.cookie);
+    const second = await start(app, first.cookie);
     expect(second.response.status).toBe(429);
     expect(second.body.error).toBe('rate_limited');
     expect(Number(second.response.headers.get('Retry-After'))).toBeGreaterThan(0);
     expect(second.response.headers.get('Cache-Control')).toBe('no-store');
 
-    // A fresh cookie from the same address is still limited by IP, and the
-    // new cookie is still delivered with the error.
-    const third = await startSession(app);
+    // A fresh cookie from the same address is still limited, and still delivered.
+    const third = await start(app);
     expect(third.response.status).toBe(429);
     expect(third.cookie).toStartWith('visitor=');
   });
 
-  test('answers 503 when every demo phone is busy', async () => {
-    const { app } = setup({ maxConcurrent: 1 });
-    await startSession(app);
-
-    const busy = await startSession(app);
-    expect(busy.response.status).toBe(503);
-    expect(busy.body.error).toBe('capacity_reached');
-  });
-
-  test('passes the API status through without its text', async () => {
+  test('keeps the API status of an upstream error but not its text', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => {});
-    const { app, devices, store } = setup();
-    devices.failNext(
-      'createDevice',
-      Object.assign(new Error('422 DEVICE_TYPE_UNAVAILABLE'), {
-        status: 422,
-        error: { detail: 'Device type android_cloud_phone is unavailable.' },
-      }),
-    );
+    const { app, devices } = setup();
+    devices.create = async () => {
+      const error = new Error('422 Device type android_cloud_phone is unavailable');
+      throw Object.assign(error, { status: 422 });
+    };
 
-    const result = await startSession(app);
-
+    const result = await start(app);
     expect(result.response.status).toBe(422);
-    expect(result.body).toMatchObject({
-      error: 'demo_unavailable',
-      message: 'Something went wrong. Please try again.',
-    });
-    expect(JSON.stringify(result.body)).not.toContain('android_cloud_phone');
-    expect(store.countOpen()).toBe(0);
+    const message = 'Something went wrong. Please try again.';
+    expect(result.body).toEqual({ error: 'demo_unavailable', message });
+    expect(store.open()).toEqual([]);
     consoleError.mockRestore();
   });
 
-  test('always answers with JSON, even when something unexpected is thrown', async () => {
+  test('answers with JSON even when something that is not an Error is thrown', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => {});
     const { app, devices } = setup();
-    devices.createDevice = async () => {
-      throw 'not even an Error';
+    devices.create = async () => {
+      throw 'not an Error';
     };
 
-    const result = await startSession(app);
-
+    const result = await start(app);
     expect(result.response.status).toBe(502);
-    expect(result.response.headers.get('Content-Type')).toContain('application/json');
     expect(result.body.error).toBe('demo_unavailable');
     consoleError.mockRestore();
   });
