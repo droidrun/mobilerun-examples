@@ -22,16 +22,18 @@ adapting it.
    `MOBILERUN_CLOUD_API_KEY` on the server and use `MOBILERUN_API_URL` only to
    override the default API base.
 3. Every SDK call, ownership and the device lifecycle live in
-   `src/server/portal.ts`; users and device links persist in
-   `src/server/store.ts` (SQLite). Tests fake the SDK client.
-4. To adapt it, delete the stub `POST /api/login` route in
-   `src/server/api-app.ts` (anyone can sign in as any email) and replace it
-   together with `src/server/session.ts` by your identity provider. Keep a
-   user-to-device table in your own database.
+   `src/server/portal-service.ts`; users and device links persist in
+   `src/server/store.ts` (SQLite); the environment is read in
+   `src/server/config.ts`; `src/server/api-app.ts` holds the routes and the one
+   error mapping. Tests fake the SDK client.
+4. Sign-in is a stub: `POST /api/login` in `src/server/api-app.ts` signs anyone
+   in as any email, and `src/server/session.ts` is its cookie. To adapt the
+   example, replace both together with your identity provider; the rest only
+   needs a user id. Keep a user-to-device table in your own database.
 5. To rebrand, edit `brand.json` (company, product, tagline, `#rrggbb` accent,
    24×24 SVG logo path). `src/client/theme.css`, `src/client/brand.ts` and
-   `src/client/components/{app-shell,phone-frame}.tsx` are shared verbatim with
-   the other white-label examples; keep them generic and put page-specific
+   `src/client/components/` (app shell, notice, phone frame) are shared verbatim
+   with the other white-label examples; keep them generic and put page-specific
    styles in `src/styles.css`.
 6. For offline work, run `bun run check` (tests, typecheck, build). Do not
    create a real device.
@@ -49,16 +51,18 @@ adapting it.
   `deviceType: 'android_cloud_phone'` and `maxRetries: 0`, and terminate (and
   log) a device that was created but could not be linked. Remove ownership rows
   only by `(user, device)` of the device the request captured.
-- The Mobilerun API has one organisation key, no sub-accounts, no
+- The Mobilerun API has one organization key, no sub-accounts, no
   per-end-user keys, no metadata or tags on devices, and no per-end-user
   billing. Ownership, quotas, and charging belong in your own server and DB.
-- Pass Mobilerun 4xx errors on with their status; do not add client-side gates
-  for quotas, capabilities, or balance. Do not map an upstream `401` or `403` to
-  the end user's session. Do not show upstream state text; label states in your
-  own words.
+- Pass Mobilerun 4xx errors on with their status and text, and turn a `401`,
+  `403` or 5xx into a plain `502`; never map an upstream `401`/`403` to the end
+  user's session. Do not add client-side gates for quotas, capabilities, or
+  balance. Do not show upstream state text; label states in your own words.
+  Keep `hono/csrf` on `/api/*`.
 - Let the server decide whether a device can stream: the browser asks, retries
-  with backoff, and refetches on reconnect. Poll device state one request at a
-  time and keep polling through failures.
+  with backoff, and asks again on reconnect, dropping answers that arrive after
+  sign-out or a state change. Poll device state one request at a time and keep
+  polling through failures, the first load included.
 - Keep Mobilerun branding out of the end-user page. Never print or log the API
   key.
 - Keep the stub login local-only. Require a real identity provider, server-side
