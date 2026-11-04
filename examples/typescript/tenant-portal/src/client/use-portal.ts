@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeviceView, Session } from '@/shared/contracts';
-import { ApiClientError, portalApi } from './api-client';
+import type { DeviceAction, DeviceView, Session } from '@/shared/contracts';
+import {
+  ApiClientError,
+  errorMessage,
+  isUnauthorized,
+  portalApi,
+} from './api-client';
 import { isSettled } from './state-label';
 
-type DeviceAction = 'stop' | 'resume' | 'reboot' | 'reset';
-
 const POLL_MS = 4_000;
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const MAX_POLL_MS = 30_000;
 
 export function usePortal() {
   const [booting, setBooting] = useState(true);
@@ -28,28 +28,36 @@ export function usePortal() {
     setDeviceLoaded(false);
   }, []);
 
+  // One place for failures: an expired session signs out, anything else shows.
+  const fail = useCallback(
+    (caught: unknown) => {
+      if (isUnauthorized(caught)) signedOut();
+      else setError(errorMessage(caught));
+    },
+    [signedOut],
+  );
+
+  /** Resolves true when the server answered, false when the request failed. */
   const refreshDevice = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal): Promise<boolean> => {
       const serial = ++requestSerial.current;
       try {
         const next = await portalApi.getDevice(signal);
         if (serial === requestSerial.current) setDevice(next);
+        return true;
       } catch (caught) {
-        if (signal?.aborted || serial !== requestSerial.current) return;
-        if (caught instanceof ApiClientError && caught.status === 401) {
-          signedOut();
-          return;
-        }
+        if (signal?.aborted || serial !== requestSerial.current) return true;
         if (caught instanceof ApiClientError && caught.status === 404) {
           setDevice(null);
-        } else {
-          setError(messageOf(caught));
+          return true;
         }
+        fail(caught);
+        return false;
       } finally {
         if (serial === requestSerial.current) setDeviceLoaded(true);
       }
     },
-    [signedOut],
+    [fail],
   );
 
   useEffect(() => {
@@ -76,19 +84,28 @@ export function usePortal() {
     return () => controller.abort();
   }, [userEmail, refreshDevice]);
 
-  // Poll serially while the device moves between states.
+  // While the device moves between states, poll serially: the next attempt is
+  // scheduled after every attempt, failed or not, and backs off on failures.
   const deviceState = device?.state;
   useEffect(() => {
     if (!userEmail || !deviceState || isSettled(deviceState)) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void refreshDevice(controller.signal);
-    }, POLL_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
+    let timer: number | undefined;
+    let interval = POLL_MS;
+
+    const poll = async () => {
+      const answered = await refreshDevice(controller.signal);
+      if (controller.signal.aborted) return;
+      interval = answered ? POLL_MS : Math.min(interval * 2, MAX_POLL_MS);
+      timer = window.setTimeout(poll, interval);
     };
-  }, [userEmail, deviceState, device, refreshDevice]);
+
+    timer = window.setTimeout(poll, interval);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [userEmail, deviceState, refreshDevice]);
 
   const run = useCallback(
     async (work: () => Promise<void>) => {
@@ -97,16 +114,12 @@ export function usePortal() {
       try {
         await work();
       } catch (caught) {
-        if (caught instanceof ApiClientError && caught.status === 401) {
-          signedOut();
-        } else {
-          setError(messageOf(caught));
-        }
+        fail(caught);
       } finally {
         setBusy(false);
       }
     },
-    [signedOut],
+    [fail],
   );
 
   return {

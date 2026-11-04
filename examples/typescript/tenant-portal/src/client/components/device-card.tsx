@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import type { DeviceView } from '@/shared/contracts';
+import type { DeviceAction, DeviceView } from '@/shared/contracts';
 import { stateLabel } from '../state-label';
 import { DeviceScreen } from './device-screen';
 
 type DeviceCardProps = {
   device: DeviceView;
   busy: boolean;
-  onAction: (action: 'stop' | 'resume' | 'reboot' | 'reset') => void;
+  onAction: (action: DeviceAction) => void;
   onTerminate: () => void;
 };
 
@@ -39,6 +39,15 @@ export function DeviceCard({
     if (pending === 'terminate') onTerminate();
   };
 
+  const buttons = [
+    stopped
+      ? { label: 'Start', className: 'primary', onClick: () => onAction('resume') }
+      : { label: 'Stop', className: '', onClick: () => onAction('stop') },
+    { label: 'Restart', className: '', onClick: () => onAction('reboot') },
+    { label: 'Reset', className: '', onClick: () => setConfirming('reset') },
+    { label: 'Delete', className: 'danger', onClick: () => setConfirming('terminate') },
+  ];
+
   return (
     <section className="card device-card" aria-label="Your phone">
       <div className="device-layout">
@@ -59,49 +68,17 @@ export function DeviceCard({
           </p>
 
           <div className="actions">
-            {stopped ? (
+            {buttons.map(({ label, className, onClick }) => (
               <button
-                className="button primary"
+                key={label}
+                className={`button ${className}`}
                 type="button"
                 disabled={busy}
-                onClick={() => onAction('resume')}
+                onClick={onClick}
               >
-                Start
+                {label}
               </button>
-            ) : (
-              <button
-                className="button"
-                type="button"
-                disabled={busy}
-                onClick={() => onAction('stop')}
-              >
-                Stop
-              </button>
-            )}
-            <button
-              className="button"
-              type="button"
-              disabled={busy}
-              onClick={() => onAction('reboot')}
-            >
-              Restart
-            </button>
-            <button
-              className="button"
-              type="button"
-              disabled={busy}
-              onClick={() => setConfirming('reset')}
-            >
-              Reset
-            </button>
-            <button
-              className="button danger"
-              type="button"
-              disabled={busy}
-              onClick={() => setConfirming('terminate')}
-            >
-              Delete
-            </button>
+            ))}
           </div>
 
           {confirming ? (

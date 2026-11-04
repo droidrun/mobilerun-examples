@@ -1,5 +1,4 @@
 import { brand } from './brand';
-import { AdminPanel } from './client/components/admin-panel';
 import { BrandMark } from './client/components/brand-mark';
 import { DeviceCard } from './client/components/device-card';
 import { SignIn } from './client/components/sign-in';
@@ -73,8 +72,6 @@ export function App() {
       ) : (
         <p className="muted">Loading your phone…</p>
       )}
-
-      {session.isAdmin ? <AdminPanel /> : null}
     </main>
   );
 }
@@ -82,7 +79,7 @@ export function App() {
 function ApiKeyMissing() {
   return (
     <p className="error banner" role="alert">
-      API key missing: set <code>MOBILERUN_API_KEY</code> in <code>.env</code>{' '}
+      API key missing: set <code>MOBILERUN_CLOUD_API_KEY</code> in <code>.env</code>{' '}
       and restart the server. Phones cannot be managed until then.
     </p>
   );

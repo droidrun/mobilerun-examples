@@ -2,20 +2,7 @@
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-synthesis: none;
-  /* Overwritten at startup from brand.json by applyBrand(). These are the
-     variables @mobilerun/react reads, so the stream follows the brand. */
-  --background: #0f1420;
-  --foreground: #e8ecf5;
-  --primary: #2f6fed;
-  --primary-foreground: #ffffff;
-  --card: #151b2a;
-  --card-foreground: #e8ecf5;
-  --muted: #1c2437;
-  --muted-foreground: #98a2b8;
-  --accent: #1a2a4d;
-  --accent-foreground: #e8ecf5;
-  --border: #283149;
-  --ring: #2f6fed;
+  /* Palette variables come from brand.json via applyBrand() in src/brand.ts. */
   --danger: #e5484d;
 }
 

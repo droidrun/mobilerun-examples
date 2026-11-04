@@ -11,11 +11,6 @@ const LABELS: Record<string, string> = {
   unknown: 'Unavailable',
 };
 
-/** Device states in which the stream can be opened. */
-export function isStreamable(state: string): boolean {
-  return state === 'ready' || state === 'assigned';
-}
-
 /** Device states that settle by themselves, so polling can pause. */
 export function isSettled(state: string): boolean {
   return state === 'ready' || state === 'stopped' || state === 'maintenance';

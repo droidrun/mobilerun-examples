@@ -1,12 +1,11 @@
-import brandConfig from '../brand.json';
+import brand from '../brand.json';
 
-export type Brand = typeof brandConfig;
-
-export const brand: Brand = brandConfig;
+export { brand };
 
 /**
  * Map brand.json onto the CSS variables the portal and @mobilerun/react read,
- * so the live device stream follows the reseller's colors.
+ * so the live device stream follows the reseller's colors. This is the only
+ * place the palette is defined.
  */
 export function applyBrand(root: HTMLElement = document.documentElement): void {
   const { primary, primaryForeground, background, foreground } = brand.colors;

@@ -1,17 +1,20 @@
 import type { z } from 'zod';
 import {
-  adminOverviewSchema,
   apiErrorSchema,
   deviceViewSchema,
   healthSchema,
   sessionSchema,
   streamCredentialsSchema,
-  type AdminOverview,
+  type DeviceAction,
   type DeviceView,
   type Health,
   type Session,
   type StreamCredentials,
 } from '@/shared/contracts';
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -65,6 +68,10 @@ async function request<T>(
 
 const post = (signal?: AbortSignal): RequestInit => ({ method: 'POST', signal });
 
+export function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 401;
+}
+
 export const portalApi = {
   health(signal?: AbortSignal): Promise<Health> {
     return request('/api/health', healthSchema, { signal });
@@ -96,7 +103,7 @@ export const portalApi = {
   },
 
   async deviceAction(
-    action: 'stop' | 'resume' | 'reboot' | 'reset',
+    action: DeviceAction,
     signal?: AbortSignal,
   ): Promise<void> {
     await send(`/api/device/${action}`, post(signal));
@@ -108,9 +115,5 @@ export const portalApi = {
 
   stream(signal?: AbortSignal): Promise<StreamCredentials> {
     return request('/api/device/stream', streamCredentialsSchema, { signal });
-  },
-
-  adminUsers(signal?: AbortSignal): Promise<AdminOverview> {
-    return request('/api/admin/users', adminOverviewSchema, { signal });
   },
 };
