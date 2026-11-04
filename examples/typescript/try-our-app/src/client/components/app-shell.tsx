@@ -1,6 +1,9 @@
-// Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical.
+// Shared with the other white-label examples in this folder.
 import type { ReactNode } from 'react';
 import { brand } from '../brand';
+
+/** Status tones. theme.css colors pills and notices by their `data-tone`. */
+export type Tone = 'neutral' | 'busy' | 'live' | 'warn' | 'danger';
 
 export function BrandMark({ size = 24 }: { size?: number }) {
   return (
@@ -10,21 +13,29 @@ export function BrandMark({ size = 24 }: { size?: number }) {
   );
 }
 
+/** One line of feedback with a tone bar, such as an error next to the button that caused it. */
+export function Notice({ tone = 'danger', text }: { tone?: Tone; text: string }) {
+  return (
+    <p className="notice" data-tone={tone} role="alert">
+      {text}
+    </p>
+  );
+}
+
 type AppShellProps = {
-  product: string;
   /** Context for the right end of the top bar, such as a countdown or the account. */
   right?: ReactNode;
   children: ReactNode;
 };
 
-export function AppShell({ product, right, children }: AppShellProps) {
+export function AppShell({ right, children }: AppShellProps) {
   return (
     <>
       <header className="topbar">
         <div className="topbar-inner">
           <span className="wordmark">
             <BrandMark />
-            {product}
+            {brand.product}
           </span>
           {right}
         </div>

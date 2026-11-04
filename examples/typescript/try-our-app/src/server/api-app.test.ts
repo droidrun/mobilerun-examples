@@ -10,9 +10,13 @@ afterEach(() => store.close());
 
 function setup(rateLimitMax = 10) {
   let count = 0;
+  const calls: Array<string> = [];
   const terminated: Array<string> = [];
   const devices = {
-    create: async (): Promise<{ id: string }> => ({ id: `device-${++count}` }),
+    create: async (): Promise<{ id: string }> => {
+      calls.push('create');
+      return { id: `device-${++count}` };
+    },
     waitReady: async () => {},
     apps: { start: async () => {} },
     kiosk: { enable: async () => {} },
@@ -29,8 +33,8 @@ function setup(rateLimitMax = 10) {
     maxConcurrent: 5,
   });
   const limiter = createRateLimiter({ max: rateLimitMax, windowMs: 60_000 });
-  const app = createApiApp({ service, limiter, cookieSecret: 'test-secret' });
-  return { app, devices, terminated };
+  const app = createApiApp({ service, limiter, sessionSecret: 's'.repeat(40) });
+  return { app, calls, devices, terminated };
 }
 
 type App = ReturnType<typeof setup>['app'];
@@ -38,23 +42,27 @@ type App = ReturnType<typeof setup>['app'];
 const BUN_ENV = { server: { requestIP: () => ({ address: '203.0.113.7', family: 'IPv4', port: 1 }) } };
 
 async function start(app: App, cookie?: string) {
-  const init: RequestInit = { method: 'POST', headers: cookie ? { Cookie: cookie } : {} };
-  const response = await app.request('/api/sessions', init, BUN_ENV);
+  const response = await app.request('/api/sessions', as(cookie, 'POST'), BUN_ENV);
   const body = (await response.json()) as Record<string, string>;
   return { response, body, cookie: cookie ?? response.headers.get('set-cookie')?.split(';')[0] ?? '' };
 }
 
-const as = (cookie: string, method = 'GET') => ({ method, headers: { Cookie: cookie } });
+/** Same-origin browser writes carry an Origin header; the CSRF guard checks it. */
+function as(cookie?: string, method = 'GET') {
+  return { method, headers: { Origin: 'http://localhost', ...(cookie && { Cookie: cookie }) } };
+}
+const upstream = (status: number, error: object) =>
+  Object.assign(new Error(String(status)), { status, error });
 
 describe('sessions API', () => {
   test('without an API key the page still loads and starts are refused with JSON', async () => {
     store = createSessionStore(':memory:');
     const limiter = createRateLimiter({ max: 1, windowMs: 1 });
-    const app = createApiApp({ service: null, limiter, cookieSecret: 's' });
+    const app = createApiApp({ service: null, limiter, sessionSecret: 's'.repeat(40) });
 
     expect(await (await app.request('/api/health')).json()).toEqual({ ok: true, sdkConfigured: false });
-    const response = await app.request('/api/sessions', { method: 'POST' }, BUN_ENV);
-    expect(response.status).toBe(500);
+    const response = await app.request('/api/sessions', as(undefined, 'POST'), BUN_ENV);
+    expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: 'missing_api_key' });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
@@ -108,18 +116,27 @@ describe('sessions API', () => {
     expect(third.cookie).toStartWith('visitor=');
   });
 
-  test('keeps the API status of an upstream error but not its text', async () => {
+  test('shows the text of an API 4xx, but not of a rejected key or a 5xx', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => {});
     const { app, devices } = setup();
+    let failure = upstream(422, { message: 'Device type unavailable.' });
     devices.create = async () => {
-      const error = new Error('422 Device type android_cloud_phone is unavailable');
-      throw Object.assign(error, { status: 422 });
+      throw failure;
     };
+    const rejected = await start(app);
+    expect(rejected.response.status).toBe(422);
+    const message = 'Device type unavailable.';
+    expect(rejected.body).toEqual({ error: 'upstream_rejected', message });
+    failure = upstream(402, { title: 'Insufficient balance' });
+    expect((await start(app)).body.message).toBe('Insufficient balance');
 
-    const result = await start(app);
-    expect(result.response.status).toBe(422);
-    const message = 'Something went wrong. Please try again.';
-    expect(result.body).toEqual({ error: 'demo_unavailable', message });
+    for (const status of [401, 503]) {
+      failure = upstream(status, { message: 'bad key' });
+      const hidden = await start(app);
+      expect(hidden.response.status).toBe(502);
+      expect(hidden.body.error).toBe('upstream_error');
+      expect(hidden.body.message).not.toContain('bad key');
+    }
     expect(store.open()).toEqual([]);
     consoleError.mockRestore();
   });
@@ -132,8 +149,8 @@ describe('sessions API', () => {
     };
 
     const result = await start(app);
-    expect(result.response.status).toBe(502);
-    expect(result.body.error).toBe('demo_unavailable');
+    expect(result.response.status).toBe(500);
+    expect(result.body.error).toBe('internal_error');
     consoleError.mockRestore();
   });
 });

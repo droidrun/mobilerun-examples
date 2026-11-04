@@ -7,6 +7,3 @@
   padding-block: var(--s-4);
 }
 .facts dt { color: var(--ink-muted); }
-
-.countdown { font-weight: 600; color: var(--ink-muted); }
-.countdown .num { color: var(--ink); }

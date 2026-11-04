@@ -1,6 +1,5 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import '@mobilerun/react/styles.css';
 import './client/theme.css';
 import './styles.css';
 import { App } from './app';

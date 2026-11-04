@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react';
 import { brand } from './client/brand';
-import { AppShell } from './client/components/app-shell';
-import { PhoneFrame, type Tone } from './client/components/phone-frame';
-import { useDemo, type Demo, type Notice } from './client/use-demo';
+import { AppShell, Notice, type Tone } from './client/components/app-shell';
+import { PhoneFrame } from './client/components/phone-frame';
+import { useDemo, type Demo } from './client/use-demo';
 
 /** Where "Get Fernly" leads. Point it at your store listing. */
 const GET_APP_URL = 'https://example.com/get-fernly';
 const { company, product } = brand;
+const KEEP_GOING = `Get ${product} on your own phone and keep going.`;
 
-/** Pill above the phone, its tone, and the line on the empty screen. */
-const PHONE: Record<Demo['phase'], [status: string, tone: Tone, label: string]> = {
-  idle: ['Not started', 'neutral', `${product} opens here.`],
-  starting: ['Starting', 'busy', 'Getting a phone ready…'],
-  live: ['Live', 'live', 'Connecting…'],
-  ending: ['Ending', 'busy', 'Ending your demo…'],
-  ended: ['Ended', 'neutral', 'This demo has ended.'],
+/** The phone frame per phase: its pill, the pill's tone, and the line on the empty screen. */
+const PHONE: Record<Demo['phase'], { pill: string; tone: Tone; line: string }> = {
+  idle: { pill: 'Not started', tone: 'neutral', line: `${product} opens here.` },
+  starting: { pill: 'Starting', tone: 'busy', line: 'Getting a phone ready…' },
+  live: { pill: 'Live', tone: 'live', line: 'Connecting…' },
+  ending: { pill: 'Ending', tone: 'busy', line: 'Ending your demo…' },
+  ended: { pill: 'Ended', tone: 'neutral', line: 'This demo has ended.' },
 };
 
 /** m:ss since `from` or until `to`. Ticks on its own so the phone stream does not re-render. */
@@ -28,9 +29,6 @@ function Clock({ from = 0, to }: { from?: number; to?: number }) {
   const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   return <span className="num">{text}</span>;
 }
-
-const NoticeLine = ({ notice }: { notice?: Notice }) =>
-  notice ? <p className="notice" data-tone={notice.tone} role="alert">{notice.text}</p> : null;
 
 const GetApp = ({ primary = false }) => (
   <a className={primary ? 'btn btn-primary' : 'btn'} href={GET_APP_URL}>Get {product}</a>
@@ -58,7 +56,7 @@ function Panel({ demo, start, end, reset }: ReturnType<typeof useDemo>) {
             Tap, swipe and type on the phone. Back, Home and Recents sit under the screen.
           </p>
           <p className="small">It stays in {product} for this demo and is wiped when it ends.</p>
-          <NoticeLine notice={demo.notice} />
+          {demo.notice && <Notice {...demo.notice} />}
           <div className="actions">
             <button
               className="btn btn-danger"
@@ -77,8 +75,7 @@ function Panel({ demo, start, end, reset }: ReturnType<typeof useDemo>) {
         <>
           <h1>{demo.expired ? 'Your demo time is up' : `Thanks for trying ${product}`}</h1>
           <p className="muted">
-            {demo.expired ? '' : 'The demo phone has been released. '}
-            Get {product} on your own phone and keep going.
+            {demo.expired ? KEEP_GOING : `The demo phone has been released. ${KEEP_GOING}`}
           </p>
           <div className="actions">
             <GetApp primary />
@@ -99,7 +96,7 @@ function Panel({ demo, start, end, reset }: ReturnType<typeof useDemo>) {
             <dt>Length</dt>
             <dd>A few minutes, then it ends by itself</dd>
           </dl>
-          <NoticeLine notice={demo.notice} />
+          {demo.notice && <Notice {...demo.notice} />}
           <div className="actions">
             <button className="btn btn-primary" onClick={start}>Start demo</button>
           </div>
@@ -113,24 +110,22 @@ export function App() {
   const state = useDemo();
   const { demo, refreshStream } = state;
   const session = demo.phase === 'live' || demo.phase === 'ending' ? demo : undefined;
-  const stream = session?.stream;
-  const [status, tone, label] = PHONE[demo.phase];
-  const countdown = session && (
-    <span className="countdown"><Clock to={session.deadline} /> left</span>
+  const right = session ? (
+    <span className="topbar-meta"><Clock to={session.deadline} /> left</span>
+  ) : (
+    demo.phase !== 'ended' && <GetApp />
   );
 
   return (
-    <AppShell product={product} right={countdown ?? (demo.phase !== 'ended' && <GetApp />)}>
+    <AppShell right={right}>
       <div className="split">
         <section className="stack" aria-live="polite">
           <Panel {...state} />
         </section>
         <PhoneFrame
-          stream={stream && { url: stream.streamUrl, token: stream.streamToken }}
-          label={label}
+          {...PHONE[demo.phase]}
+          stream={session?.stream}
           hasControl={demo.phase === 'live'}
-          status={status}
-          tone={tone}
           onStreamHealed={() => session && refreshStream(session.id)}
         />
       </div>

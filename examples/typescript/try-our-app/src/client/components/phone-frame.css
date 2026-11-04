@@ -1,0 +1,28 @@
+/* Shared with the other white-label examples in this folder. */
+
+/* Phone frame: the only element with depth. The screen is dark in both themes,
+   and the variables @mobilerun/react reads are pinned to it here. */
+.phone-frame { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+.phone {
+  --background: #0b0e0c; --foreground: #e7ece8; --card: #171c19; --border: #26302a;
+  --muted: #1d2420; --muted-foreground: #98a39c;
+  --primary: var(--accent); --primary-foreground: var(--accent-ink); --ring: var(--accent);
+  width: 300px;
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 36px;
+  background: #050706;
+  box-shadow: 0 0 0 1px var(--line), 0 24px 48px -16px rgb(0 0 0 / 0.45);
+}
+.phone-screen {
+  position: relative; aspect-ratio: 9 / 19.5; overflow: hidden;
+  border-radius: 26px 26px 0 0; background: var(--background);
+}
+.phone-empty {
+  position: absolute; inset: 0;
+  display: grid; place-content: center; justify-items: center; gap: var(--s-3);
+  padding: var(--s-6); background: var(--background);
+  color: var(--muted-foreground); font-size: var(--t-1); text-align: center;
+}
+.phone-nav { border-radius: 0 0 26px 26px; color: var(--foreground); transition: opacity 160ms; }
+.phone-nav.is-off { opacity: 0.35; pointer-events: none; }

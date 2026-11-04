@@ -1,4 +1,5 @@
 import type Mobilerun from '@mobilerun/sdk';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { SessionView, StreamView } from '@/shared/contracts';
 import type { SessionStore } from './session-store';
 
@@ -7,16 +8,13 @@ const KIOSK_RETRY_DELAY_MS = 1_000;
 
 /** A refusal of this server's own, with an HTTP status and text a visitor may read. */
 export class DemoError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
+  constructor(readonly code: string, readonly status: ContentfulStatusCode, message: string) {
     super(message);
   }
 }
 
-const notFound = () => new DemoError('not_found', 404, 'Demo session not found.');
-const restarting = () =>
-  new DemoError('shutting_down', 503, 'The demo is restarting. Try again in a moment.');
-const stillStarting = () =>
-  new DemoError('session_provisioning', 409, 'Your demo is still starting.');
+const RESTARTING = 'The demo is restarting. Try again in a moment.';
+const STILL_STARTING = 'Your demo is still starting.';
 const isGone = (error: unknown) => (error as { status?: unknown } | null)?.status === 404;
 const noTaskYet = (error: unknown) =>
   error instanceof Error && /no task found/i.test(error.message);
@@ -39,9 +37,17 @@ type Options = {
 export type SessionService = ReturnType<typeof createSessionService>;
 
 /** The demo lifecycle, and every @mobilerun/sdk call this example makes. */
-export function createSessionService(options: Options) {
-  const { client, store, appPackage, ttlMs, provisionTimeoutMs, maxConcurrent } = options;
-  const { now = Date.now, newId = () => crypto.randomUUID(), sleep = Bun.sleep } = options;
+export function createSessionService({
+  client,
+  store,
+  appPackage,
+  ttlMs,
+  provisionTimeoutMs,
+  maxConcurrent,
+  now = Date.now,
+  newId = () => crypto.randomUUID(),
+  sleep = Bun.sleep,
+}: Options) {
   const { devices } = client;
   const abort = new AbortController(); // interrupts phones still booting at shutdown
   const starts = new Map<string, Promise<void>>();
@@ -50,7 +56,9 @@ export function createSessionService(options: Options) {
 
   const owned = (id: string, visitorId: string) => {
     const row = store.get(id);
-    if (row?.visitorId !== visitorId) throw notFound();
+    if (row?.visitorId !== visitorId) {
+      throw new DemoError('not_found', 404, 'Demo session not found.');
+    }
     return row;
   };
 
@@ -90,8 +98,8 @@ export function createSessionService(options: Options) {
   };
 
   /** Throws once the session was closed while booting: its device is terminated, never promoted. */
-  const stillWanted = (id: string) => {
-    if (shuttingDown) throw restarting();
+  const assertStillProvisioning = (id: string) => {
+    if (shuttingDown) throw new DemoError('shutting_down', 503, RESTARTING);
     if (store.get(id)?.state !== 'provisioning') {
       throw new DemoError('session_closed', 410, 'The demo ended before it was ready.');
     }
@@ -118,13 +126,13 @@ export function createSessionService(options: Options) {
         { maxRetries: 0 },
       );
       store.update(id, { deviceId: device.id });
-      stillWanted(id);
+      assertStillProvisioning(id);
       await devices.waitReady(device.id, { timeout: provisionTimeoutMs, signal: abort.signal });
-      stillWanted(id);
+      assertStillProvisioning(id);
       await devices.apps.start(appPackage, { deviceId: device.id }); // app first, then kiosk
-      stillWanted(id);
+      assertStillProvisioning(id);
       await enableKiosk(device.id);
-      stillWanted(id);
+      assertStillProvisioning(id);
       store.update(id, { state: 'live', expiresAt: now() + ttlMs });
     } catch (error) {
       await terminate(id).catch(logOwed(id));
@@ -141,8 +149,10 @@ export function createSessionService(options: Options) {
     },
 
     async start(visitorId: string): Promise<SessionView> {
-      if (shuttingDown) throw restarting();
-      if (store.activeFor(visitorId)?.state === 'provisioning') throw stillStarting();
+      if (shuttingDown) throw new DemoError('shutting_down', 503, RESTARTING);
+      if (store.activeFor(visitorId)?.state === 'provisioning') {
+        throw new DemoError('session_provisioning', 409, STILL_STARTING);
+      }
       if (store.open().length >= maxConcurrent) {
         throw new DemoError('capacity_reached', 503, 'All demo phones are busy. Try again soon.');
       }
@@ -158,7 +168,9 @@ export function createSessionService(options: Options) {
 
     async stream(id: string, visitorId: string): Promise<StreamView> {
       const row = owned(id, visitorId);
-      if (row.state === 'provisioning') throw stillStarting();
+      if (row.state === 'provisioning') {
+        throw new DemoError('session_provisioning', 409, STILL_STARTING);
+      }
       if (row.state !== 'live' || row.expiresAt <= now() || !row.deviceId) {
         throw new DemoError('session_ended', 410, 'This demo has ended.');
       }
