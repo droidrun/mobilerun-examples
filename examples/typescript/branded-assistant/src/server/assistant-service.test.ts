@@ -36,6 +36,8 @@ function fakeTasks() {
     startError: null as Error | null,
     statusError: null as Error | null,
     sent: true,
+    /** sendMessage waits for this, when set. */
+    hold: null as Promise<void> | null,
   };
   const get = async (id: string) => tasks.get(id) ?? Promise.reject(apiError(404));
   const client = {
@@ -51,6 +53,7 @@ function fakeTasks() {
       retrieve: async (id: string) => ({ task: await get(id) }),
       async sendMessage(_id: string, { message }: { message: string }) {
         calls.notes.push(message);
+        await control.hold;
         return { sent: control.sent };
       },
       async stop(id: string) {
@@ -273,6 +276,21 @@ describe('notes and ownership', () => {
     h.fake.update('task-1', { ...DONE, creditsUsed: 1 });
     await h.tick();
     await expect(note()).rejects.toMatchObject(refused(409, 'run_finished'));
+  });
+
+  test('a note answered after the run settled returns the settled run, timeline untouched', async () => {
+    const h = setup();
+    const run = await h.start();
+    let deliver = () => {};
+    h.fake.control.hold = new Promise<void>((resolve) => (deliver = resolve));
+    const sending = h.service.sendNote('user-1', run.id, 'Cheaper please');
+    h.fake.update('task-1', { ...DONE, creditsUsed: 1 });
+    await h.tick();
+    deliver();
+    const answered = await sending;
+    expect(answered).toMatchObject({ status: 'completed', charged: 1 });
+    expect(texts(answered)).toEqual(['Started', 'Finished']);
+    expect(texts(h.make().session('user-1').run!)).toEqual(['Started', 'Finished']);
   });
 
   test("another user's run answers 404 for reads, notes and cancel", async () => {

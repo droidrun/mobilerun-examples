@@ -10,12 +10,13 @@ const RUN: RunView = {
 };
 const unused = async () => true;
 
-const render = (run: Partial<RunView>) =>
+const render = (run: Partial<RunView>, pollFailing = false) =>
   renderToString(
     <RunPanel
       run={{ ...RUN, ...run }}
       name="Wren"
       title="Cheapest hotel"
+      pollFailing={pollFailing}
       sendNote={unused}
       stop={unused}
     />,
@@ -28,6 +29,7 @@ test('an active run shows Working with elapsed time, the step count once known, 
   expect(html).toContain('Add a note');
   expect(render({ status: 'running', steps: 0, charged: null })).not.toContain('Step');
   expect(render({ status: 'cancelling', charged: null })).toContain('Stopping…');
+  expect(render({ status: 'running', charged: null }, true)).toContain('Retrying.');
 });
 
 test('a result shows the found rows and what was not found in one line', () => {
@@ -44,4 +46,12 @@ test("a failed run reads as the assistant's own words; without words nothing was
   expect(html).toContain('&quot;Sorry.&quot;');
   expect(render({})).toContain('Nothing was booked or changed.');
   expect(renderToString(<Welcome name="Wren" />)).toContain('The answer shows up here.');
+});
+
+test('a failed run with a result keeps its explanation next to the result', () => {
+  const rows = [{ label: 'Hotel', value: 'Casa Azul' }];
+  const html = render({ message: 'Prices changed while I looked.', result: { rows, missing: [] } });
+  expect(html).toContain('Wren couldn&#x27;t do this one.');
+  expect(html).toContain('Prices changed while I looked.');
+  expect(html).toContain('<dt>Hotel</dt><dd>Casa Azul</dd>');
 });

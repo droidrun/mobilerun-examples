@@ -254,8 +254,10 @@ export function createAssistantService({
         const notSent = "Your note couldn't be delivered. Try again.";
         throw new AssistantError('message_not_sent', 409, notSent);
       }
-      note(runId, 'user', text);
-      return view(run);
+      // Re-read: the run may have moved on, or settled with its final timeline, meanwhile.
+      const current = owned(userId, runId);
+      if (current.charged === null) note(runId, 'user', text);
+      return view(current);
     },
 
     async cancel(userId: string, runId: string) {

@@ -128,12 +128,14 @@ type RunPanelProps = {
   name: string;
   title: string;
   error?: string;
+  /** This page cannot reach its server right now; polling retries. */
+  pollFailing: boolean;
   sendNote: Send;
   stop: () => Promise<boolean>;
 };
 
 /** The run while it works: status, request, activity, and the note box. */
-function RunCard({ run, title, error, sendNote, stop }: RunPanelProps) {
+function RunCard({ run, title, error, pollFailing, sendNote, stop }: RunPanelProps) {
   const note = useTextForm(sendNote);
   const { pill, tone } = STATUS[run.status];
   const working = WORKING.includes(run.status);
@@ -153,6 +155,7 @@ function RunCard({ run, title, error, sendNote, stop }: RunPanelProps) {
         <p className="asked">{run.request}</p>
       </div>
       {working && <div className="progress" role="progressbar" aria-label="Working on it" />}
+      {pollFailing && <Notice tone="neutral" text="Can't reach the server right now. Retrying." />}
       {run.error && <Notice tone="warn" text={run.error} />}
       {run.timeline.length > 0 && (
         <ol className="activity" aria-label="Activity">
@@ -216,14 +219,12 @@ function ResultRows({ rows, missing }: Result) {
 function Outcome({ run, title, name }: Pick<RunPanelProps, 'run' | 'title' | 'name'>) {
   const { status, result, rawOutput, message } = run;
   // A failed task may still carry the assistant's words, for example when it declined.
-  const said = status === 'failed' && !result ? [message, rawOutput] : [];
+  const said = status === 'failed' ? [message, result ? null : rawOutput] : [];
   const words = said.filter((text): text is string => Boolean(text));
   return (
     <section className="card stack" aria-label="Result">
       <h2>{title}</h2>
-      {status === 'failed' && !result && (
-        <p className="muted">{`${name} couldn't do this one.`}</p>
-      )}
+      {status === 'failed' && <p className="muted">{`${name} couldn't do this one.`}</p>}
       {words.map((text) => <blockquote key={text} className="reply">{text}</blockquote>)}
       {status === 'cancelled' && <p className="muted">{message ?? NOTHING_CHANGED}</p>}
       {result ? (
@@ -287,6 +288,7 @@ export function App() {
             name={persona.name}
             title={title}
             error={errorAt('run')}
+            pollFailing={assistant.pollFailing}
             sendNote={assistant.sendNote}
             stop={assistant.stop}
           />

@@ -31,12 +31,31 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 /** This server's own text; a lost connection or a timeout reads as unreachable. */
 const textOf = (error: unknown) => (error instanceof ApiError ? error.message : UNREACHABLE);
 
+/**
+ * After a failed start, the re-read session tells whether a run started anyway (a timed-out
+ * request may still have reached the server). That run is adopted; otherwise the error shows.
+ */
+export function afterFailedStart(
+  fresh: SessionView | undefined,
+  error: unknown,
+): AssistantNotice | undefined {
+  if (fresh?.run && !isTerminal(fresh.run.status)) return undefined;
+  return { at: 'start', text: textOf(error) };
+}
+
 export function useAssistant() {
   const [session, setSession] = useState<SessionView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [notice, setNotice] = useState<AssistantNotice>();
-  const setRun = (run: RunView) => {
+  const [pollFailing, setPollFailing] = useState(false);
+
+  /** A new run replaces the one on the page. */
+  const showNewRun = (run: RunView) => {
     setSession((now) => now && { ...now, run, balance: run.balance });
+  };
+  /** A late answer about a run that is no longer on the page is dropped. */
+  const updateRun = (run: RunView) => {
+    setSession((now) => (now?.run?.id === run.id ? { ...now, run, balance: run.balance } : now));
   };
   const load = () =>
     api<SessionView>('GET', '/api/session').then(setSession, () => setLoadFailed(true));
@@ -44,8 +63,9 @@ export function useAssistant() {
 
   const run = session?.run;
   const activeId = run && !isTerminal(run.status) ? run.id : undefined;
-  // Serial polling of the active run, backing off while it fails. The server answers from what
-  // its own watcher recorded, so polling never reaches the backend.
+  // Serial polling of the active run, backing off while it fails, with a quiet notice until it
+  // recovers. The server answers from what its own watcher recorded, so polling never reaches
+  // the backend.
   useEffect(() => {
     if (!activeId) return;
     let cancelled = false;
@@ -53,20 +73,22 @@ export function useAssistant() {
     let timer = setTimeout(async function poll() {
       const next = await api<RunView>('GET', `/api/runs/${activeId}`).catch(() => undefined);
       if (cancelled) return;
-      if (next) setRun(next);
+      if (next) updateRun(next);
+      setPollFailing(!next);
       delay = next ? POLL_MS : Math.min(delay * 2, MAX_POLL_MS);
       timer = setTimeout(poll, delay);
     }, delay);
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      setPollFailing(false);
     };
   }, [activeId]);
 
   /** One action on the active run; false, with a notice, when it failed. */
   const act = async (path: string, body?: unknown) => {
     try {
-      setRun(await api<RunView>('POST', `/api/runs/${activeId}/${path}`, body));
+      updateRun(await api<RunView>('POST', `/api/runs/${activeId}/${path}`, body));
       setNotice(undefined);
       return true;
     } catch (error) {
@@ -79,6 +101,7 @@ export function useAssistant() {
     session,
     loadFailed,
     notice,
+    pollFailing,
     reload: () => {
       setLoadFailed(false);
       void load();
@@ -87,15 +110,12 @@ export function useAssistant() {
     async start(presetId: string, message: string) {
       setNotice(undefined);
       try {
-        setRun(await api<RunView>('POST', '/api/runs', { presetId, message }));
+        showNewRun(await api<RunView>('POST', '/api/runs', { presetId, message }));
         return true;
       } catch (error) {
         const fresh = await api<SessionView>('GET', '/api/session').catch(() => undefined);
         if (fresh) setSession(fresh);
-        // A timed-out start may still have started a run: look before offering another.
-        if (!fresh?.run || isTerminal(fresh.run.status)) {
-          setNotice({ at: 'start', text: textOf(error) });
-        }
+        setNotice(afterFailedStart(fresh, error));
         return false;
       }
     },
