@@ -1,0 +1,11 @@
+{
+  "name": "Kestrel MyPhone",
+  "tagline": "Your phone, in the cloud.",
+  "logoPath": "M12 3 4 8v3l8-3 8 3V8l-8-5Zm0 7-8 3v3l8-3 8 3v-3l-8-3Zm0 7-8 3h16l-8-3Z",
+  "colors": {
+    "primary": "#2f6fed",
+    "primaryForeground": "#ffffff",
+    "background": "#0f1420",
+    "foreground": "#e8ecf5"
+  }
+}
