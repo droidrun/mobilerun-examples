@@ -92,7 +92,7 @@ export function createAssistantService(
       request: run.request,
       status: run.status,
       steps: run.steps,
-      timeline: entry?.timeline ?? [],
+      timeline: entry?.timeline ?? run.timeline ?? [],
       result: parsed?.success ? parsed.data : null,
       rawOutput:
         run.output !== null && !parsed?.success
@@ -106,6 +106,7 @@ export function createAssistantService(
           : null),
       charged: run.charged,
       balance: ledger.balance(run.userId),
+      createdAt: run.createdAt,
     };
   };
 

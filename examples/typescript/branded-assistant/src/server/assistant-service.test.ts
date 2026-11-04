@@ -196,7 +196,6 @@ describe('settlement by the watcher', () => {
       balance: 93,
       result: OUTPUT,
       rawOutput: null,
-      timeline: [],
     });
   });
 
@@ -293,6 +292,45 @@ describe('stuck runs and upstream trouble', () => {
     h.fake.control.statusError = null;
     await h.tick();
     expect(h.service.get('user-1', run.id).error).toBeNull();
+  });
+
+  test('the final timeline survives eviction and a restart', async () => {
+    const h = createHarness();
+    const run = await h.service.start('user-1', REQUEST);
+    h.fake.update('task-1', { steps: 3 });
+    await h.tick();
+    await h.service.sendMessage('user-1', run.id, 'Cheaper please');
+    h.fake.update('task-1', { status: 'completed', succeeded: true, steps: 5, creditsUsed: 2, output: OUTPUT });
+    await h.tick();
+
+    const texts = (view: { timeline: Array<{ text: string }> }) => view.timeline.map((entry) => entry.text);
+    const expected = ['Started', 'Step 3', 'Cheaper please', 'Step 5', 'Finished'];
+    expect(texts(h.service.get('user-1', run.id))).toEqual(expected);
+
+    const { createAssistantService } = await import('./assistant-service');
+    const { testAssistant, testPresets } = await import('./fake-deps');
+    const restarted = createAssistantService({
+      ledger: h.ledger,
+      deps: h.fake.deps,
+      assistant: testAssistant,
+      presets: testPresets,
+      deviceIds: [DEVICE_A],
+      reservePerRun: 20,
+      pollIntervalMs: 1_000,
+      schedule: () => {},
+    });
+    expect(texts(restarted.get('user-1', run.id))).toEqual(expected);
+    expect(texts(restarted.session('user-1').runs[0]!)).toEqual(expected);
+  });
+
+  test('Step entries appear only when the step count increases', async () => {
+    const h = createHarness();
+    const run = await h.service.start('user-1', REQUEST);
+    for (const steps of [null, 0, 2, 2, 2, 4]) {
+      h.fake.update('task-1', { steps });
+      await h.tick();
+    }
+    expect(h.service.get('user-1', run.id).timeline.map((entry) => entry.text)).toEqual(['Started', 'Step 2', 'Step 4']);
   });
 
   test('step progress shows on the timeline while the run is active', async () => {

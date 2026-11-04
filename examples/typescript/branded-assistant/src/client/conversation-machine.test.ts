@@ -20,6 +20,7 @@ function run(overrides: Partial<RunView> = {}): RunView {
     error: null,
     charged: null,
     balance: 80,
+    createdAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
 }

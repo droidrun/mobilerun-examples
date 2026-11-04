@@ -80,6 +80,8 @@ code { background: var(--muted); padding: 0.1em 0.35em; border-radius: 4px; }
   content: ''; display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.4rem;
   border-radius: 50%; background: var(--primary); animation: pulse 1.2s ease-in-out infinite;
 }
+.working { margin: 0; font-size: 0.9rem; }
+.elapsed { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .assistant-reply { margin: 0; padding: 0.5rem 0.7rem; border-left: 3px solid var(--border); background: var(--muted); border-radius: 0 8px 8px 0; white-space: pre-wrap; word-break: break-word; }
 .muted { color: var(--muted-foreground); font-size: 0.85rem; margin: 0; }
 

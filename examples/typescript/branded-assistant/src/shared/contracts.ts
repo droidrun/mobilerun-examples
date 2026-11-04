@@ -88,6 +88,8 @@ export const runViewSchema = z.object({
   charged: z.number().int().nonnegative().nullable(),
   /** The user's balance after this run's reservation or settlement. */
   balance: z.number().int(),
+  /** When the run was created (ISO); the UI shows elapsed time from it. */
+  createdAt: z.string(),
 });
 
 export type RunView = z.infer<typeof runViewSchema>;

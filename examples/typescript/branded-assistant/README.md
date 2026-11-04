@@ -113,7 +113,10 @@ browser ──same-origin /api/*, session cookie──▶ Bun + Hono ──@mobi
 3. **Follow.** One server-side watcher polls `tasks.getStatus()` for every
    active run and records what it finds. `GET /api/runs/:id` only reads that
    record, so browsers never trigger upstream calls. If the backend cannot be
-   reached the run says so instead of showing stale progress.
+   reached the run says so instead of showing stale progress. The API can
+   report no steps for minutes, so the UI shows "Working…" with elapsed time
+   while a run is active, and a "Step N" entry is added only when the step
+   count actually increases.
 4. **Notes.** While a run is active, the user can send a note to the assistant
    (`POST /api/runs/:id/messages` → `tasks.sendMessage()`). If the API does not
    queue it, the user gets an error and keeps their text.
@@ -133,8 +136,10 @@ browser ──same-origin /api/*, session cookie──▶ Bun + Hono ──@mobi
 7. **Ownership.** Every run route filters by the session's user id. Someone
    else's run id answers `404`, exactly like an unknown id.
 
-The progress timeline is kept in memory: after a server restart a run is still
-reconciled and settled, but its timeline is empty.
+The progress timeline is kept in memory while a run is active and saved with
+the settlement, so finished runs keep it across restarts. After a server
+restart, a run that was still active is reconciled and settled, but its
+timeline starts empty.
 
 Phones are exclusive: one active run per phone, tracked in process. When every
 phone is busy the API answers `409 device_busy` instead of queueing. After a

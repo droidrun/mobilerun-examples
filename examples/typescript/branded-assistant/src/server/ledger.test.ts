@@ -126,3 +126,27 @@ describe('credit ledger', () => {
     expect(ledger.openRuns().map((run) => run.id)).toEqual(['run-1']);
   });
 });
+
+describe('ledger timeline', () => {
+  test('the final timeline is stored with the settlement and read back', () => {
+    const { ledger } = open();
+    reserve(ledger, 'run-1');
+    expect(ledger.getRunById('run-1')?.timeline).toBeNull();
+
+    const timeline = [{ at: '2026-01-01T00:00:00.000Z', kind: 'status' as const, text: 'Started' }];
+    ledger.settle('run-1', { status: 'completed', creditsUsed: 1, timeline });
+    expect(ledger.getRunById('run-1')?.timeline).toEqual(timeline);
+  });
+
+  test('adds the column to a database created without it', () => {
+    const db = new Database(':memory:');
+    db.run('CREATE TABLE accounts (user_id TEXT PRIMARY KEY, balance INTEGER NOT NULL)');
+    db.run(`CREATE TABLE runs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, task_id TEXT, device_id TEXT NOT NULL,
+      reserved INTEGER NOT NULL, settled INTEGER, status TEXT NOT NULL, preset_id TEXT NOT NULL, request TEXT NOT NULL,
+      output TEXT, message TEXT, steps INTEGER, created_at TEXT NOT NULL)`);
+    const ledger = createLedger(db, 100);
+    reserve(ledger, 'run-1');
+    ledger.settle('run-1', { status: 'failed', creditsUsed: 0, timeline: [] });
+    expect(ledger.getRunById('run-1')?.timeline).toEqual([]);
+  });
+});

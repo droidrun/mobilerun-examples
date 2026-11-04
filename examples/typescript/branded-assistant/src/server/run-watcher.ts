@@ -4,7 +4,10 @@ import type { AssistantDeps } from './assistant-deps';
 import type { Ledger, RunRecord } from './ledger';
 import { mapStatus } from './progress';
 
-/** In-memory state for active runs only; history lives in SQLite. */
+/**
+ * In-memory state for active runs only. The final timeline is saved with the
+ * settlement, so history (and restarts) keep it.
+ */
 export type LiveRun = {
   timeline: Array<TimelineEntry>;
   lastSteps: number;
@@ -82,10 +85,12 @@ export function createRunWatcher(options: RunWatcherOptions) {
       const result = await deps.retrieveTask(taskId).catch(() => null);
       creditsUsed = result?.creditsUsed ?? null;
     }
+    note(live, run.id, 'status', 'Stopped before finishing');
     ledger.settle(run.id, {
       status: 'failed',
       creditsUsed,
       message: 'The request took too long and was stopped.',
+      timeline: live.get(run.id)?.timeline,
     });
     finish(run);
   };
@@ -135,8 +140,19 @@ export function createRunWatcher(options: RunWatcherOptions) {
       entry.error = 'The assistant is hard to reach right now. Retrying.';
       return;
     }
+    note(
+      live,
+      runId,
+      'status',
+      status === 'completed'
+        ? 'Finished'
+        : status === 'cancelled'
+          ? 'Cancelled'
+          : 'Stopped before finishing',
+    );
     ledger.settle(runId, {
       status,
+      timeline: entry.timeline,
       creditsUsed: result.creditsUsed ?? null,
       output: result.output,
       message: result.message ?? state.message ?? null,

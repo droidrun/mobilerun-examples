@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { isTerminalStatus, type PublicPreset, type RunView } from '@/shared/contracts';
+import { formatElapsed, useNow } from '../elapsed';
 import { statusLabel } from '../status-label';
 import { ProgressTimeline } from './progress-timeline';
 import { ResultCard } from './result-card';
@@ -64,7 +65,19 @@ function Declined({ run, preset }: Pick<RunMessageProps, 'run' | 'preset'>) {
   );
 }
 
+/** Steps can stay at 0 for minutes, so show that the run is alive with elapsed time. */
+function Working({ run }: { run: RunView }) {
+  const now = useNow(true);
+  const label = run.status === 'cancelling' ? 'Stopping…' : 'Working…';
+  return (
+    <p className="working" role="status">
+      {label} <span className="elapsed">{formatElapsed(now - Date.parse(run.createdAt))}</span>
+    </p>
+  );
+}
+
 export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageProps) {
+  const working = run.status === 'starting' || run.status === 'running' || run.status === 'cancelling';
   return (
     <>
       <div className="bubble bubble-user">
@@ -77,6 +90,8 @@ export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageP
           <span className={`status status-${run.status}`}>{statusLabel(run.status)}</span>
           {run.charged !== null ? <span className="muted">{run.charged} credits used</span> : null}
         </div>
+
+        {working ? <Working run={run} /> : null}
 
         {run.error ? <p className="muted" role="status">{run.error}</p> : null}
 

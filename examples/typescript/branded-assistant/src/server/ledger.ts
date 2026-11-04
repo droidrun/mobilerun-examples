@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isTerminalStatus, type RunStatus } from '@/shared/contracts';
+import { isTerminalStatus, type RunStatus, type TimelineEntry } from '@/shared/contracts';
 
 /**
  * The example's own credit ledger. Mobilerun bills the organization behind the
@@ -34,6 +34,8 @@ export type RunRecord = {
   output: unknown;
   message: string | null;
   steps: number | null;
+  /** The final timeline, saved when the run settles; null while active. */
+  timeline: Array<TimelineEntry> | null;
   createdAt: string;
 };
 
@@ -55,6 +57,7 @@ export type SettleInput = {
   output?: unknown;
   message?: string | null;
   steps?: number | null;
+  timeline?: Array<TimelineEntry>;
 };
 
 export interface Ledger {
@@ -88,6 +91,7 @@ type RunRow = {
   output: string | null;
   message: string | null;
   steps: number | null;
+  timeline: string | null;
   created_at: string;
 };
 
@@ -105,6 +109,7 @@ function toRecord(row: RunRow): RunRecord {
     output: row.output === null ? null : (JSON.parse(row.output) as unknown),
     message: row.message,
     steps: row.steps,
+    timeline: row.timeline === null ? null : (JSON.parse(row.timeline) as Array<TimelineEntry>),
     createdAt: row.created_at,
   };
 }
@@ -137,9 +142,15 @@ export function createLedger(db: Database, startingBalance: number): Ledger {
       output TEXT,
       message TEXT,
       steps INTEGER,
+      timeline TEXT,
       created_at TEXT NOT NULL
     )
   `);
+  // Databases created before the timeline column existed.
+  const columns = db.query<{ name: string }, []>('PRAGMA table_info(runs)').all();
+  if (!columns.some((column) => column.name === 'timeline')) {
+    db.run('ALTER TABLE runs ADD COLUMN timeline TEXT');
+  }
   db.run('CREATE INDEX IF NOT EXISTS runs_user_idx ON runs (user_id, created_at)');
 
   const insertAccount = db.query(
@@ -180,7 +191,7 @@ export function createLedger(db: Database, startingBalance: number): Ledger {
   const finishRun = db.query(
     `UPDATE runs
      SET settled = ?2, status = ?3, output = ?4, message = ?5,
-         steps = COALESCE(?6, steps)
+         steps = COALESCE(?6, steps), timeline = ?7
      WHERE id = ?1 AND settled IS NULL`,
   );
 
@@ -220,6 +231,7 @@ export function createLedger(db: Database, startingBalance: number): Ledger {
         : JSON.stringify(input.output),
       input.message ?? null,
       input.steps ?? null,
+      input.timeline ? JSON.stringify(input.timeline) : null,
     );
     if (charged < run.reserved) credit.run(run.user_id, run.reserved - charged);
     return true;

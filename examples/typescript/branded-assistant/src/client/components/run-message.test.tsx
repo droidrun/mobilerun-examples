@@ -16,6 +16,7 @@ const run: RunView = {
   error: null,
   charged: 3,
   balance: 97,
+  createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 function render(overrides: Partial<RunView>): string {
@@ -41,6 +42,14 @@ describe('run message', () => {
     expect(html).toContain('<blockquote class="assistant-reply">I only help with travel.</blockquote>');
     expect(html).toContain('Sorry, that is outside what I can do.');
     expect(html).not.toContain('[object Object]');
+  });
+
+  test('an active run shows Working with elapsed time even when no steps are reported', () => {
+    const html = render({ status: 'running', steps: null, charged: null });
+    expect(html).toContain('Working…');
+    expect(html).toContain('class="elapsed"');
+    expect(render({ status: 'cancelling', charged: null })).toContain('Stopping…');
+    expect(render({ status: 'completed' })).not.toContain('Working…');
   });
 
   test('a failed task with no words says nothing was changed', () => {
