@@ -1,4 +1,4 @@
 interface:
   display_name: "Mobilerun Branded Assistant"
   short_description: "Build white-label assistants with per-user credits"
-  default_prompt: "Use $mobilerun-branded-assistant to adapt and test a branded, server-side assistant that runs Mobilerun tasks with a persona, follow-up questions, and a per-user credit ledger."
+  default_prompt: "Use $mobilerun-branded-assistant to adapt and test a branded, server-side assistant that runs Mobilerun tasks with a persona, notes to the running task, and a per-user credit ledger."
