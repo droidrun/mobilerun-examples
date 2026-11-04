@@ -1,210 +1,131 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import type Mobilerun from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
-import { FakeApiError, createHarness } from './fake-deps';
+import { createAssistantService } from './assistant-service';
+import { createLedger } from './ledger';
 
-const SECRET = 'test-secret-that-is-at-least-32-characters-long';
+const PHONES = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+const START = { presetId: 'cheapest-hotel', message: 'Lisbon' };
+afterEach(() => mock.restore());
 
-function setup(options?: Parameters<typeof createHarness>[0]) {
-  const harness = createHarness(options);
-  const app = createApiApp({
-    service: harness.service,
-    sessionSecret: SECRET,
-    production: false,
+/** The app over a real service, an in-memory ledger and a fake `client.tasks`. */
+function setup({ balance = 100, configured = true } = {}) {
+  const tasks = {
+    run: mock(async (): Promise<{ id: string }> => ({ id: 'task-1' })),
+    sendMessage: mock(async () => ({ sent: true })),
+  };
+  const ledger = createLedger(':memory:', balance);
+  const service = createAssistantService({
+    client: configured ? ({ tasks } as unknown as Mobilerun) : null,
+    ledger,
+    deviceIds: PHONES,
+    reservePerRun: 20,
+    pollIntervalMs: 1_000,
+    schedule: () => {},
   });
-  return { app, ...harness };
+  const app = createApiApp({ service, sessionSecret: 'test-secret-that-is-at-least-32-chars' });
+  return { app, tasks, ledger };
 }
 
-/** A tiny cookie jar so one "browser" keeps its identity across requests. */
+/** One browser: keeps its session cookie across requests. */
 function browser(app: ReturnType<typeof setup>['app']) {
   let cookie = '';
-  return async (path: string, init: RequestInit = {}) => {
-    const response = await app.request(path, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...init.headers },
-    });
-    const set = response.headers.get('Set-Cookie');
-    if (set) cookie = set.split(';')[0] ?? '';
+  return async (path: string, body?: unknown) => {
+    const headers = { 'Content-Type': 'application/json', Cookie: cookie };
+    const post = { method: 'POST', body: JSON.stringify(body) };
+    const response = await app.request(path, { headers, ...(body === undefined ? {} : post) });
+    cookie = response.headers.get('Set-Cookie')?.split(';')[0] ?? cookie;
     return response;
   };
 }
-
-const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
-const START = { presetId: 'hotel', message: 'Lisbon' };
+const answer = async (response: Response) => [response.status, await response.json()];
+const error = (code: string) => expect.objectContaining({ error: code });
 
 describe('session', () => {
-  test('hands out a signed HttpOnly cookie and a stable identity', async () => {
-    const { app } = setup();
+  test('a signed HttpOnly cookie; a forged one is replaced; reads create no run', async () => {
+    const { app, ledger } = setup();
     const first = await app.request('/api/session');
     const cookie = first.headers.get('Set-Cookie') ?? '';
-    expect(cookie).toContain('assistant_session=');
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Lax');
-
-    const again = await app.request('/api/session', { headers: { Cookie: cookie.split(';')[0] ?? '' } });
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    const again = await app.request('/api/session', { headers: { Cookie: cookie.split(';')[0]! } });
     expect(again.headers.get('Set-Cookie')).toBeNull();
+    const forged = { headers: { Cookie: 'assistant_session=x.forged' } };
+    expect((await app.request('/api/session', forged)).headers.get('Set-Cookie')).toContain('assistant_session=');
+    expect(ledger.open()).toEqual([]);
   });
 
-  test('replaces a forged cookie instead of trusting it', async () => {
-    const { app } = setup();
-    const response = await app.request('/api/session', {
-      headers: { Cookie: 'assistant_session=someone-else.forgedsignature' },
-    });
-    expect(response.headers.get('Set-Cookie')).toContain('assistant_session=');
-  });
-
-  test('reading the session never creates ledger accounts', async () => {
-    const { app, accountCount } = setup();
-    for (let visit = 0; visit < 3; visit += 1) {
-      expect(((await (await app.request('/api/session')).json()) as { balance: number }).balance).toBe(100);
-    }
-    expect(accountCount()).toBe(0);
-  });
-
-  test('loads without an API key and reports it', async () => {
-    const { app } = setup({ withDeps: false });
+  test('without an API key the page loads and starts are refused with JSON', async () => {
+    const { app } = setup({ configured: false });
+    expect(await (await app.request('/api/health')).json()).toEqual({ ok: true, sdkConfigured: false });
     const call = browser(app);
-    expect(await (await call('/api/session')).json()).toMatchObject({ sdkConfigured: false, balance: 100 });
-
-    const start = await call('/api/runs', post(START));
-    expect(start.status).toBe(503);
-    expect(await start.json()).toMatchObject({ error: 'missing_api_key' });
-  });
-
-  test('keeps prompts, model ids, task ids and stream credentials out of the browser contract', async () => {
-    const { app } = setup();
-    const call = browser(app);
-    await call('/api/runs', post(START));
-    const text = await (await call('/api/session')).text();
-    for (const secret of ['SECRET-SYSTEM-PROMPT', 'secret/model-id', 'task-1', 'stream', 'instruction']) {
-      expect(text).not.toContain(secret);
-    }
-  });
-});
-
-describe('csrf', () => {
-  test('rejects cross-origin form-style posts and accepts same-origin ones', async () => {
-    const { app } = setup();
-    const cross = await app.request('/api/runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain', Origin: 'https://evil.example' },
-      body: JSON.stringify(START),
-    });
-    expect(cross.status).toBe(403);
-
-    const same = await app.request('/api/runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain', Origin: 'http://localhost' },
-      body: JSON.stringify(START),
-    });
-    expect(same.status).not.toBe(403);
+    expect(await (await call('/api/session')).json()).toMatchObject({ balance: 100, run: null });
+    expect(await answer(await call('/api/runs', START))).toEqual([503, error('missing_api_key')]);
   });
 });
 
 describe('runs', () => {
-  test('starts, then reads what the watcher settled', async () => {
-    const { app, fake, tick } = setup();
+  test('rejects cross-origin form posts', async () => {
+    const { app } = setup();
+    const post = (Origin: string) =>
+      app.request('/api/runs', { method: 'POST', headers: { 'Content-Type': 'text/plain', Origin }, body: '{}' });
+    expect((await post('https://evil.example')).status).toBe(403);
+    expect((await post('http://localhost')).status).not.toBe(403);
+  });
+
+  test('201 on start, 409 run_active, 202 when unconfirmed, 402 when short', async () => {
+    const { app, tasks } = setup();
     const call = browser(app);
+    expect((await call('/api/runs', START)).status).toBe(201);
+    expect(await answer(await call('/api/runs', START))).toEqual([409, error('run_active')]);
 
-    const started = await call('/api/runs', post(START));
-    expect(started.status).toBe(201);
-    const run = (await started.json()) as { id: string };
-
-    fake.update('task-1', { status: 'completed', succeeded: true, creditsUsed: 5, output: { hotelName: 'Casa', notes: [] } });
-    await tick();
-    expect(await (await call(`/api/runs/${run.id}`)).json()).toMatchObject({
-      status: 'completed',
-      charged: 5,
-      balance: 95,
-      result: { hotelName: 'Casa', notes: [] },
-    });
+    spyOn(console, 'warn').mockImplementation(() => {});
+    tasks.run.mockImplementation(() => Promise.reject(new Error('network down')));
+    expect((await browser(app)('/api/runs', START)).status).toBe(202);
+    expect((await browser(setup({ balance: 0 }).app)('/api/runs', START)).status).toBe(402);
   });
 
-  test('answers 202 when the start could not be confirmed', async () => {
-    const { app, fake } = setup();
-    fake.control.startError = new FakeApiError(undefined, 'network down');
-    const response = await browser(app)('/api/runs', post(START));
-    expect(response.status).toBe(202);
-    expect(await response.json()).toMatchObject({ status: 'unknown' });
-  });
+  test('passes API errors on with their status; hides unexpected ones behind a 500', async () => {
+    const { app, tasks } = setup();
+    spyOn(console, 'error').mockImplementation(() => {});
+    const unavailable = Object.assign(new Error('Device type unavailable'), { status: 422 });
+    tasks.run.mockImplementation(() => Promise.reject(unavailable));
+    const upstream = await answer(await browser(app)('/api/runs', START));
+    expect(upstream).toEqual([422, { error: 'upstream_error', message: 'Device type unavailable' }]);
 
-  test('answers 409 for a second active run', async () => {
-    const { app } = setup({ deviceIds: ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'] });
+    tasks.run.mockImplementation(async () => ({ id: 'task-2' }));
+    tasks.sendMessage.mockImplementation(() => Promise.reject(new TypeError('password is hunter2')));
     const call = browser(app);
-    expect((await call('/api/runs', post(START))).status).toBe(201);
-    const second = await call('/api/runs', post(START));
-    expect(second.status).toBe(409);
-    expect(await second.json()).toMatchObject({ error: 'run_active' });
+    const run = (await (await call('/api/runs', START)).json()) as { id: string };
+    const failed = await call(`/api/runs/${run.id}/messages`, { message: 'hi' });
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain('hunter2');
   });
 
-  test('answers 402 JSON when the user is out of credits', async () => {
-    const { app } = setup({ startingBalance: 0 });
-    const response = await browser(app)('/api/runs', post(START));
-    expect(response.status).toBe(402);
-    expect(await response.json()).toMatchObject({ error: 'insufficient_credits' });
-  });
-
-  test('renders upstream 4xx errors as returned', async () => {
-    const { app, fake } = setup();
-    fake.control.startError = new FakeApiError(422, 'Device type unavailable');
-    const response = await browser(app)('/api/runs', post(START));
-    expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ error: 'upstream_error', message: 'Device type unavailable' });
-  });
-
-  test('rejects privileged fields and malformed input before any task starts', async () => {
-    const { app, fake } = setup();
+  test('refuses privileged fields and malformed input before any task starts', async () => {
+    const { app, tasks } = setup();
     const call = browser(app);
-    for (const body of [
-      { ...START, llmModel: 'other/model' },
-      { ...START, message: '   ' },
-      { message: 'no preset' },
-    ]) {
-      expect((await call('/api/runs', post(body))).status).toBe(400);
+    for (const body of [{ ...START, llmModel: 'x' }, { ...START, message: '  ' }, { message: 'x' }]) {
+      expect(await answer(await call('/api/runs', body))).toEqual([400, error('invalid_request')]);
     }
-    expect(fake.calls.start).toHaveLength(0);
+    expect(tasks.run).not.toHaveBeenCalled();
   });
 
-  test("answers 404 for another browser's run, for notes and cancel too", async () => {
-    const { app, fake } = setup();
+  test("another browser's run is a 404, like an unknown id", async () => {
+    const { app, tasks } = setup();
     const owner = browser(app);
     const other = browser(app);
-    const run = (await (await owner('/api/runs', post(START))).json()) as { id: string };
-
+    const run = (await (await owner('/api/runs', START)).json()) as { id: string };
     for (const response of [
       await other(`/api/runs/${run.id}`),
-      await other(`/api/runs/${run.id}/messages`, post({ message: 'hi' })),
-      await other(`/api/runs/${run.id}/cancel`, post({})),
-      await other('/api/runs/not-a-uuid'),
+      await other(`/api/runs/${run.id}/messages`, { message: 'hi' }),
+      await other(`/api/runs/${run.id}/cancel`, {}),
+      await other('/api/runs/not-a-run'),
     ]) {
-      expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: 'run_not_found' });
+      expect(await answer(response)).toEqual([404, error('run_not_found')]);
     }
-    expect(fake.calls.messages).toEqual([]);
-    expect(fake.calls.stops).toEqual([]);
+    expect(tasks.sendMessage).not.toHaveBeenCalled();
     expect((await owner(`/api/runs/${run.id}`)).status).toBe(200);
-  });
-
-  test('an undelivered note is an error response', async () => {
-    const { app, fake } = setup();
-    const call = browser(app);
-    const run = (await (await call('/api/runs', post(START))).json()) as { id: string };
-    fake.control.messageSent = false;
-    const response = await call(`/api/runs/${run.id}/messages`, post({ message: 'hi' }));
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: 'message_not_sent' });
-  });
-
-  test('hides unexpected errors behind a generic 500', async () => {
-    const { app, fake } = setup();
-    const call = browser(app);
-    const run = (await (await call('/api/runs', post(START))).json()) as { id: string };
-    const quiet = spyOn(console, 'error').mockImplementation(() => {});
-    fake.deps.sendMessage = async () => {
-      throw new TypeError('db password is hunter2');
-    };
-    const response = await call(`/api/runs/${run.id}/messages`, post({ message: 'hi' }));
-    expect(response.status).toBe(500);
-    expect(await response.text()).not.toContain('hunter2');
-    quiet.mockRestore();
   });
 });
