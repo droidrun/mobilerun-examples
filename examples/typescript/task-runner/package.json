@@ -12,7 +12,7 @@
     "check": "bun test && bun run typecheck && bun run build"
   },
   "dependencies": {
-    "@mobilerun/react": "^0.1.0",
+    "@mobilerun/react": "^0.2.0",
     "@mobilerun/sdk": "^6.1.0",
     "hono": "^4.12.27",
     "react": "^19.0.0",
