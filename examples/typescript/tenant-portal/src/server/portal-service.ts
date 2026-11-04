@@ -9,7 +9,6 @@ import type { PortalStore } from './store';
 export type RemoteDevice = {
   id: string;
   state: string;
-  stateMessage: string;
   createdAt: string;
   streamUrl?: string | undefined;
   streamToken?: string | undefined;
@@ -46,7 +45,6 @@ export type PortalService = {
 function toView(device: RemoteDevice): DeviceView {
   return {
     state: device.state,
-    stateMessage: device.stateMessage,
     createdAt: device.createdAt,
   };
 }

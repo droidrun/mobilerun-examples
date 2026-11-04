@@ -60,9 +60,6 @@ export function DeviceCard({
               {stateLabel(device.state)}
             </span>
           </div>
-          {device.stateMessage ? (
-            <p className="muted">{device.stateMessage}</p>
-          ) : null}
           <p className="muted">
             Created {new Date(device.createdAt).toLocaleString()}
           </p>

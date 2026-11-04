@@ -39,6 +39,7 @@ function createFakeDeps() {
   const fake = {
     devices,
     calls,
+    createdNames: [] as Array<string>,
     createFailure: null as UpstreamError | null,
     terminateFailure: null as Error | null,
     // When set, terminate/retrieve calls park here until a test releases them.
@@ -49,10 +50,10 @@ function createFakeDeps() {
       async createDevice(name) {
         if (fake.createFailure) throw fake.createFailure;
         counter += 1;
+        fake.createdNames.push(name);
         const device: RemoteDevice = {
           id: `device-${counter}`,
           state: 'creating',
-          stateMessage: name,
           createdAt: '2026-01-01T00:00:00Z',
           streamUrl: `wss://stream.example/device-${counter}`,
           streamToken: `token-${counter}`,
@@ -296,9 +297,9 @@ describe('device lifecycle', () => {
     expect(response.status).toBe(201);
     expect(body).toEqual({
       state: 'creating',
-      stateMessage: 'tenant-1',
       createdAt: '2026-01-01T00:00:00Z',
     });
+    expect(fake.createdNames).toEqual(['tenant-1']);
     expect(store.getDeviceId(1)).toBe('device-1');
   });
 

@@ -20,7 +20,6 @@ export type DeviceAction = z.infer<typeof deviceActionSchema>;
 // leaves the server.
 export const deviceViewSchema = z.object({
   state: z.string().min(1),
-  stateMessage: z.string(),
   createdAt: z.string(),
 });
 

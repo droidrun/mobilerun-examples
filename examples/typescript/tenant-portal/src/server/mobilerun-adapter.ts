@@ -7,7 +7,6 @@ function toRemote(device: SdkDevice): RemoteDevice {
   return {
     id: device.id,
     state: device.state,
-    stateMessage: device.stateMessage,
     createdAt: device.createdAt,
     // An empty string means "not streaming yet".
     streamUrl: device.streamUrl || undefined,
