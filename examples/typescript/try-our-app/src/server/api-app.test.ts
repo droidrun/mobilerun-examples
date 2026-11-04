@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type Mobilerun from '@mobilerun/sdk';
+import { APIConnectionError, APIConnectionTimeoutError } from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
 import { createRateLimiter } from './rate-limiter';
 import { createSessionService } from './session-service';
@@ -153,6 +154,21 @@ describe('sessions API', () => {
       expect(hidden.response.status).toBe(502);
       expect(hidden.body.error).toBe('upstream_error');
       expect(hidden.body.message).not.toContain('bad key');
+    }
+    expect(store.open()).toEqual([]);
+    consoleError.mockRestore();
+  });
+
+  test('an API that cannot be reached (connection error, timeout) is a plain 502', async () => {
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {});
+    const { app, devices } = setup();
+    for (const failure of [new APIConnectionError({}), new APIConnectionTimeoutError()]) {
+      devices.create = async () => {
+        throw failure;
+      };
+      const result = await start(app);
+      expect(result.response.status).toBe(502);
+      expect(result.body.error).toBe('upstream_error');
     }
     expect(store.open()).toEqual([]);
     consoleError.mockRestore();

@@ -78,8 +78,9 @@ an API key the page still loads and session requests answer `503`.
   or is down when a demo expires, that phone keeps billing: list devices named
   `demo-*` and terminate the ones you do not recognize.
 - **Errors**: `src/server/api-app.ts` maps every failure to JSON. An API 4xx
-  keeps its status and text; a `401`/`403` (your key) or a 5xx becomes a plain
-  `502`. Writes are checked by `hono/csrf`. The page shows its own plain line,
+  keeps its status and text; a `401`/`403` (your key), a 5xx, or an API that
+  cannot be reached (connection error, timeout) becomes a plain `502`. Writes
+  are checked by `hono/csrf`. The page shows its own plain line,
   except for this server's own limits (busy, rate limited).
 - **Brand**: `brand.json` (company, product, tagline, accent, 24×24 logo path)
   re-themes the page. `src/client/theme.css`, `brand.ts` and `components/` are

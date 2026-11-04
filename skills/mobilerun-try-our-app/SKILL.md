@@ -39,10 +39,11 @@ session lifecycle when adapting it.
 ## Required boundaries
 
 - Use `deviceType: 'android_cloud_phone'` and create with `maxRetries: 0`.
-  Keep the API's status and text for its 4xx errors, and turn a `401`/`403` or
-  5xx into a plain `502`. The page shows visitors its own plain line and says
-  "busy" only for the example's own capacity and rate limits. Add no
-  client-side gates for quotas or capabilities. Keep `hono/csrf` on `/api/*`.
+  Keep the API's status and text for its 4xx errors, and turn a `401`/`403`, a
+  5xx, or a connection error or timeout into a plain `502`. The page shows
+  visitors its own plain line and says "busy" only for the example's own
+  capacity and rate limits. Add no client-side gates for quotas or
+  capabilities. Keep `hono/csrf` on `/api/*`.
 - Start the app before enabling kiosk: lock-task mode needs a running task of
   the package. Retry kiosk briefly while the API says "no task found".
 - The browser receives `streamUrl` and `streamToken` only for the session its

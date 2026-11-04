@@ -5,6 +5,7 @@ import { csrf } from 'hono/csrf';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { APIConnectionError } from '@mobilerun/sdk';
 import type { ErrorBody } from '@/shared/contracts';
 import type { RateLimiter } from './rate-limiter';
 import { DemoError, type SessionService } from './session-service';
@@ -17,19 +18,25 @@ type Options = {
   secureCookies?: boolean;
 };
 type UpstreamError = { status?: unknown; error?: Record<string, unknown> | null };
+type Failure = { status: ContentfulStatusCode; body: ErrorBody };
 
 const COOKIE = 'visitor';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // seconds
 const SOMETHING_WRONG = 'Something went wrong. Please try again.';
+const UPSTREAM_FAILED: Failure = {
+  status: 502,
+  body: { error: 'upstream_error', message: SOMETHING_WRONG },
+};
 const NOT_SET_UP = 'This service is not set up yet. Please try again later.';
 
 /**
  * The one error mapping. Own refusals keep their status and text. An API 4xx (an unavailable
  * device type, an insufficient balance) keeps its status and the API's text. A 401/403 means
- * this server's key is wrong, not the user's session: like a 5xx it becomes a plain 502.
- * Anything else, a thrown non-Error included, is a plain 500.
+ * this server's key is wrong, not the user's session: like a 5xx, a connection error or a
+ * timeout it becomes a plain 502. Anything else, a thrown non-Error included, is a bug of this
+ * server: a plain 500.
  */
-function toError(error: unknown): { status: ContentfulStatusCode; body: ErrorBody } {
+function toError(error: unknown): Failure {
   if (error instanceof DemoError) {
     return { status: error.status, body: { error: error.code, message: error.message } };
   }
@@ -38,13 +45,13 @@ function toError(error: unknown): { status: ContentfulStatusCode; body: ErrorBod
     return { status: error.status, body };
   }
   console.error('request failed', error);
+  // Connection errors and timeouts carry no HTTP status, but the API failed, not this server.
+  if (error instanceof APIConnectionError) return UPSTREAM_FAILED;
   const { status, error: body } = (error ?? {}) as UpstreamError;
   if (typeof status !== 'number' || status < 400 || status >= 600) {
     return { status: 500, body: { error: 'internal_error', message: SOMETHING_WRONG } };
   }
-  if (status >= 500 || status === 401 || status === 403) {
-    return { status: 502, body: { error: 'upstream_error', message: SOMETHING_WRONG } };
-  }
+  if (status >= 500 || status === 401 || status === 403) return UPSTREAM_FAILED;
   const text = [body?.message, body?.detail, body?.title].find((v) => typeof v === 'string' && v);
   const message = typeof text === 'string' ? text : SOMETHING_WRONG;
   return { status: status as ContentfulStatusCode, body: { error: 'upstream_rejected', message } };
