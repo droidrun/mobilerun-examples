@@ -57,10 +57,11 @@ what a white-label product adds on top of it.
   Past `executionTimeout` plus a margin, stop the task, settle, free the phone.
 - Validate task output with the preset's zod schema; show unreadable output as
   text, never as a card. Surface `sendMessage` returning `sent: false`.
-- Keep the API's status and text for its 4xx errors and turn a `401`/`403` or
-  5xx into a plain `502`; map the text to your own copy for a white-label
-  product. Add no client-side gates for devices, quotas or permissions the
-  server decides. Keep `hono/csrf` on `/api/*`.
+- Keep the API's status and text for its 4xx errors and turn a `401`/`403`, a
+  5xx, or a connection error or timeout into a plain `502`; map the text to
+  your own copy for a white-label product. Add no client-side gates for
+  devices, quotas or permissions the server decides. Keep `hono/csrf` on
+  `/api/*`.
 - In the browser, drop a late answer about a run that is no longer the current
   one, and show a quiet notice while polling this server fails.
 - One active run per phone and one process: the locks and the watcher are in

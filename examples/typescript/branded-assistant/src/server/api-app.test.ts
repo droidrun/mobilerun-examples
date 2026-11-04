@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type Mobilerun from '@mobilerun/sdk';
+import { APIConnectionTimeoutError } from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
 import { createAssistantService } from './assistant-service';
 import { createLedger } from './ledger';
@@ -86,7 +87,7 @@ describe('runs', () => {
     expect((await browser(setup({ balance: 0 }).app)('/api/runs', START)).status).toBe(402);
   });
 
-  test('passes API 4xx text on; a 5xx becomes a plain 502, anything else a plain 500', async () => {
+  test('passes API 4xx text on; a 5xx or no connection is a plain 502, else a 500', async () => {
     const { app, tasks } = setup();
     spyOn(console, 'error').mockImplementation(() => {});
     const message = 'Device type unavailable';
@@ -101,6 +102,8 @@ describe('runs', () => {
     const run = (await (await call('/api/runs', START)).json()) as { id: string };
     const note = () => call(`/api/runs/${run.id}/messages`, { message: 'hi' });
     tasks.sendMessage.mockImplementation(() => Promise.reject(apiError(503)));
+    expect(await answer(await note())).toEqual([502, error('upstream_error')]);
+    tasks.sendMessage.mockImplementation(() => Promise.reject(new APIConnectionTimeoutError()));
     expect(await answer(await note())).toEqual([502, error('upstream_error')]);
     tasks.sendMessage.mockImplementation(() => Promise.reject(new TypeError('password is hunter2')));
     const failed = await note();

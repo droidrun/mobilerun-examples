@@ -96,8 +96,9 @@ nor the schema ever reaches the browser.
   Output that does not match is shown as text. A failed task shows the
   assistant's own words next to any result.
 - **Errors**: `src/server/api-app.ts` maps every failure to JSON. An API 4xx
-  keeps its status and text; a `401`/`403` (your key) or a 5xx becomes a plain
-  `502`. Writes are checked by `hono/csrf`.
+  keeps its status and text; a `401`/`403` (your key), a 5xx, or an API that
+  cannot be reached (connection error, timeout) becomes a plain `502`. Writes
+  are checked by `hono/csrf`.
 - **Brand**: `brand.json` (company, product, tagline, accent, 24×24 logo path)
   re-themes the page. `src/client/theme.css`, `brand.ts` and
   `components/app-shell.tsx` are shared verbatim with the other white-label
