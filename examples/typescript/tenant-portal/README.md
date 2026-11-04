@@ -18,7 +18,8 @@ browser ──cookie session──▶ Bun + Hono (this example) ──@mobilerun
 - ownership enforced by the reseller's own server: every device route resolves
   the device from the signed-in user's row, never from a client-supplied id, and
   anything else is a `404`;
-- a per-user quota (`MAX_DEVICES_PER_USER`, answered with `409` when reached);
+- one device per user, enforced by a unique index and answered with `409` when
+  the user already has one;
 - the device lifecycle with `devices.create`, `retrieve`, `stop`, `resume`,
   `reboot`, `reset` and `terminate`;
 - a live, controllable screen with `<DeviceStream hasControl>`,
@@ -27,8 +28,7 @@ browser ──cookie session──▶ Bun + Hono (this example) ──@mobilerun
   insufficient balance) shown to the user as the API returned them, with no
   client-side gates;
 - a brand file (`brand.json`) that drives the page and the stream components'
-  colors, with no Mobilerun branding in the customer UI;
-- an optional admin view of all customers and their device state.
+  colors, with no Mobilerun branding in the customer UI.
 
 ## Requirements
 
@@ -47,43 +47,51 @@ bun run dev
 Set the server-side key in `.env`:
 
 ```dotenv
-MOBILERUN_API_KEY=dr_sk_...
+MOBILERUN_CLOUD_API_KEY=dr_sk_...
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in with any email.
 Without an API key the page still loads and shows an "API key missing" notice.
+Leave `SESSION_SECRET` empty for local runs: the server then makes a random one
+per process and sessions reset on restart.
 
 Creating a device uses your account's balance or plan, so the example does
 nothing until you click **Get my phone**.
 
-The server always binds to `127.0.0.1`.
+The bind address is `127.0.0.1` by design. Change it deliberately when you
+deploy.
 
 ## How it works
 
 1. `POST /api/login { email }` creates the user if needed and sets a signed
    `HttpOnly`, `SameSite=Lax` session cookie (`hono/cookie`, signed with
-   `SESSION_SECRET`). `POST /api/logout` clears it. This is a stub.
+   `SESSION_SECRET`). `POST /api/logout` clears it. **The login route is the
+   stub:** anyone can sign in as any email. When you wire a real identity
+   provider, delete that route and replace `src/server/session.ts` together
+   with it. Writes are also guarded by `hono/csrf`.
 2. The browser only calls the portal's own `/api/*` routes. The server holds
-   `MOBILERUN_API_KEY` and is the only code that calls `@mobilerun/sdk`
+   `MOBILERUN_CLOUD_API_KEY` and is the only code that calls `@mobilerun/sdk`
    (`src/server/mobilerun-adapter.ts`).
 3. SQLite (`bun:sqlite`) stores `users(id, email, created_at)` and
    `devices(user_id, device_id, created_at)`, both unique, so one user owns at
    most one device and one device belongs to at most one user.
 4. Creating a device calls `devices.create({ deviceType: 'android_cloud_phone',
-   name: 'tenant-<userId>' })` and stores the returned id against the user. The
-   Mobilerun device id is never sent to the browser.
+   name: 'tenant-<userId>' })` (SDK retries off, so a retry cannot bill twice)
+   and stores the returned id against the user. If the id cannot be stored, the
+   new device is terminated again. The Mobilerun device id is never sent to the
+   browser.
 5. For the live screen, the server returns only `streamUrl` and `streamToken` of
-   the caller's own device. The browser connects to the stream directly.
+   the caller's own device, or `409` while the device is not streaming yet; the
+   browser asks, retries with backoff, and connects to the stream directly.
 
 | Route | What it does |
 | --- | --- |
 | `POST /api/login`, `POST /api/logout`, `GET /api/me` | stub session |
-| `POST /api/device` | create the caller's device (`409` over quota) |
+| `POST /api/device` | create the caller's device (`409` if the user already has one) |
 | `GET /api/device` | its state |
-| `POST /api/device/stop`, `resume`, `reboot`, `reset` | lifecycle actions |
+| `POST /api/device/:action` | `stop`, `resume`, `reboot` or `reset` |
 | `DELETE /api/device` | terminate the device and delete the row |
 | `GET /api/device/stream` | `{ streamUrl, streamToken }` |
-| `GET /api/admin/users` | users and device state (`ADMIN_EMAILS` only) |
 | `GET /api/health` | whether the API key is configured |
 
 Source layout:
@@ -93,12 +101,12 @@ brand.json                    # name, logo path, colors
 src/
 ├── server/
 │   ├── api-app.ts            # Hono routes and error mapping
-│   ├── portal-service.ts     # ownership, quota, device orchestration
+│   ├── portal-service.ts     # ownership, one device per user, orchestration
 │   ├── mobilerun-adapter.ts  # the only @mobilerun/sdk calls
 │   ├── store.ts              # SQLite users and device ownership
-│   ├── session.ts            # stub signed-cookie session
+│   ├── session.ts            # signed-cookie session (replace with your IdP)
 │   └── config.ts             # zod-validated environment
-├── client/                   # sign-in, device card, live screen, admin view
+├── client/                   # sign-in, device card, live screen
 └── shared/contracts.ts       # zod schemas for the browser boundary
 ```
 
@@ -106,16 +114,14 @@ src/
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MOBILERUN_API_KEY` | none | Organisation API key, server only |
-| `MOBILERUN_API_URL` | `https://api.mobilerun.ai/v1` | API base override |
-| `SESSION_SECRET` | none | Cookie signing secret, at least 32 characters |
+| `MOBILERUN_CLOUD_API_KEY` | none | Organisation API key, server only |
+| `MOBILERUN_API_URL` | `https://api.mobilerun.ai/v1` | API base override (`/v1` is added if missing) |
+| `SESSION_SECRET` | random per process | Cookie signing secret, at least 32 characters; required in production |
 | `DATABASE_PATH` | `./data/portal.sqlite` | SQLite file |
-| `MAX_DEVICES_PER_USER` | `1` | `0` closes provisioning, `1` allows one device |
-| `ADMIN_EMAILS` | empty | Comma-separated admin emails |
 | `PORT` | `3000` | Listen port |
 
-The quota is `0` or `1` because the `devices.user_id` column is unique. To give
-users several devices, drop that constraint and add a device id to the routes.
+Each user owns one device. Supporting several would mean dropping the unique
+index on `devices.user_id` and adding a device id to the routes.
 
 ## Branding
 
@@ -142,18 +148,24 @@ bun run check
 ```
 
 The tests use a fake adapter and a temporary SQLite file. They cover
-cross-user `404`s on every device route, the quota, tampered and unsigned
-cookies, logout, termination, and configuration validation.
+cross-user `404`s on every device route, one device per user, tampered and
+unsigned cookies, cross-origin writes, logout, termination, late requests that
+must not touch a replacement device, and configuration validation.
 
 ## Before production
 
-- Replace the stub login with your identity provider. Anyone can sign in as any
-  email here, and the cookie has no server-side revocation.
+- Delete the stub `POST /api/login` route and replace it, together with
+  `src/server/session.ts`, with your identity provider.
+- There is no server-side session expiry or revocation: the cookie is only a
+  signed user id.
+- Upstream error text is shown as the API returned it. Map it to your own copy
+  for a white-label product.
 - Use a persistent, backed-up database instead of a local SQLite file, and
-  think about concurrent writers.
+  think about concurrent writers and several server processes.
 - Add rate limiting and auditing, especially on device creation.
-- Keep `MOBILERUN_API_KEY` and `SESSION_SECRET` in a secrets manager; the server
-  refuses the development `SESSION_SECRET` when `NODE_ENV=production`.
-- Serve over HTTPS (the session cookie is `Secure` in production) and put the
-  server behind your own reverse proxy rather than a local bind.
+- Set `SESSION_SECRET` (`openssl rand -hex 32`) and keep it and
+  `MOBILERUN_CLOUD_API_KEY` in a secrets manager.
+- Serve over HTTPS (the session cookie is `Secure` in production). The bind
+  address is local by design; change it deliberately when you deploy, for
+  example behind your own reverse proxy.
 - Decide how you bill customers and cap what a single customer can spend.
