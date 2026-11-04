@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
 | Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
+| TypeScript | [Branded assistant](examples/typescript/branded-assistant/) | A white-label travel assistant: persona, live progress, follow-up questions, result cards, and a per-user credit ledger |
 
 Each example is self-contained, runnable, and documents the decisions you
 should revisit before taking it to production.
@@ -50,6 +51,18 @@ bun run dev
 
 Open the [task runner guide](examples/typescript/task-runner/README.md) for its
 server-only API key model and verification commands.
+
+### TypeScript branded assistant
+
+```bash
+cd examples/typescript/branded-assistant
+bun install
+cp .env.example .env
+bun run dev
+```
+
+Open the [branded assistant guide](examples/typescript/branded-assistant/README.md)
+for the white-label model, the credit ledger, and what the API does not do for you.
 
 ### Python webhook receiver
 
