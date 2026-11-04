@@ -60,7 +60,8 @@ binds to `127.0.0.1` only.
 1. `POST /api/sessions`: the server reads or sets a signed, anonymous visitor
    cookie, applies the rate limit (keyed by IP address and cookie) and the
    concurrency cap, creates the phone, waits until it is ready, locks it to
-   `DEMO_APP_PACKAGE`, starts that app, and returns the session id and expiry.
+   `DEMO_APP_PACKAGE`, starts that app, and returns the session id and
+   `expiresInSeconds`.
    A visitor who already has a running demo gets that one back instead of a
    second phone.
 2. `GET /api/sessions/:id/stream`: only for the cookie that owns the session.
@@ -69,9 +70,18 @@ binds to `127.0.0.1` only.
 3. `DELETE /api/sessions/:id`: the owner ends the demo early; the phone is
    terminated.
 4. A reaper loop terminates sessions whose time is up. On `SIGINT` or `SIGTERM`
-   the server stops accepting starts and terminates every live phone. Sessions
-   are kept in SQLite, so a phone that outlived a crashed server is terminated
-   by the reaper once its time is up.
+   the server stops accepting starts, interrupts phones that are still booting,
+   and terminates every live phone. Ending a session goes through one
+   terminate path: a row is only marked ended once the device is confirmed
+   gone (or the API says it no longer exists). If a terminate fails, the row
+   stays open, keeps its concurrency slot, and the reaper retries it on every
+   sweep. Sessions are kept in SQLite, so a restart resumes that duty.
+
+   **Limits of crash recovery.** If the process dies between creating a phone
+   and saving its id, or the server is down when a demo expires, that phone
+   keeps running and keeps billing. Reconcile by listing devices whose name
+   starts with `demo-` (`devices.list({ search: 'demo-' })`, or the dashboard)
+   and terminating the ones you do not recognize.
 5. API errors (for example an unavailable device type or insufficient balance)
    are returned with the API's own status and message. The browser adds no
    gates of its own.
@@ -79,7 +89,7 @@ binds to `127.0.0.1` only.
 ### Layout
 
 ```text
-brand.json                   # name, copy, inline SVG logo, colors
+brand.json                   # name, copy, inline SVG logo, two colors
 src/
 ├── client/
 │   ├── components/          # demo panel (hero, countdown, CTA) and phone frame
@@ -94,6 +104,7 @@ src/
 │   ├── session-service.ts   # SDK-independent session lifecycle
 │   └── session-store.ts     # bun:sqlite session records
 └── shared/
+    ├── brand.ts             # imports and validates brand.json
     └── contracts.ts         # Zod schemas shared by both sides of the boundary
 ```
 
@@ -102,23 +113,27 @@ src/
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MOBILERUN_CLOUD_API_KEY` | none | Server-side API key |
-| `MOBILERUN_API_URL` | SDK default | Override the API base URL |
+| `MOBILERUN_API_URL` | SDK default | Override the API base URL; `/v1` is added when missing (same as the task-runner example) |
+| `PORT` | `3000` | Listen port on `127.0.0.1` |
 | `DEMO_APP_PACKAGE` | `com.android.chrome` | App the visitor is locked to; it must be installed on the phone |
 | `SESSION_TTL_SECONDS` | `300` | Length of one demo |
-| `REAPER_INTERVAL_SECONDS` | `15` | How often expired demos are swept |
 | `MAX_CONCURRENT_SESSIONS` | `3` | Cap on phones running at once |
-| `RATE_LIMIT_MAX` | `3` | Demo starts per visitor per window |
-| `RATE_LIMIT_WINDOW_SECONDS` | `3600` | Rate-limit window |
-| `PROVISION_TIMEOUT_SECONDS` | `120` | Give up on a phone that is not ready |
-| `COOKIE_SECRET` | random per start | Signs the visitor cookie (16+ characters) |
-| `SESSIONS_DB_PATH` | `data/sessions.sqlite` | SQLite file |
-| `BRAND_FILE` | `brand.json` | Brand definition |
+| `RATE_LIMIT_MAX` | `3` | Demo starts per visitor per hour |
+
+Less common knobs are constants in `src/server/config.ts`: the reaper interval
+(15 s), the boot timeout (120 s), the rate-limit window (1 h), and the SQLite
+path (`data/sessions.sqlite`). The visitor cookie is signed with a random secret
+chosen at each start, so visitors lose their session cookie when the server
+restarts.
 
 ### Branding
 
-Edit `brand.json`. Colors must be `#rrggbb`. The logo is an inline SVG that the
-page renders as an image. The brand is validated at startup, so a typo fails
-fast.
+Edit `brand.json`: name, copy, an inline SVG logo, and two colors (`primary`
+and `background`, both `#rrggbb`). `src/client/brand.ts` sets them as CSS
+variables and `src/styles.css` derives the rest (text, card, border, muted)
+for both the page and the `@mobilerun/react` components. The logo is rendered as
+an image, never as markup. The file is validated when the page loads and in
+the tests, so a typo fails fast.
 
 ## What the Mobilerun API does not do for you
 
@@ -139,7 +154,8 @@ fast.
   rate limiter if you run more than one replica.
 - Rate limit at your edge too. This example sees only `127.0.0.1` behind a proxy,
   so read the client IP from a header you trust and pass it to the limiter.
-- Set `COOKIE_SECRET` from your secret manager and serve over HTTPS.
+- Serve over HTTPS and keep the visitor-cookie secret outside the process (it
+  is random per start here).
 - Put your real app on the demo phone before it is locked (`devices.create`
   accepts an `apps` list; `devices.apps.install()` also exists) and point
   `DEMO_APP_PACKAGE` at it.

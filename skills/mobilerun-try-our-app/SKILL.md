@@ -23,8 +23,8 @@ session lifecycle when adapting it.
 3. Keep SDK calls in `src/server/mobilerun-adapter.ts` and the lifecycle in
    `src/server/session-service.ts`, which only sees the adapter interface. Tests
    use a fake adapter.
-4. To rebrand, edit `brand.json` (name, copy, inline SVG logo, `#rrggbb`
-   colors). To lock to another app, set `DEMO_APP_PACKAGE`; the app must already
+4. To rebrand, edit `brand.json` (name, copy, inline SVG logo, and the two
+   `#rrggbb` colors `primary` and `background`). To lock to another app, set `DEMO_APP_PACKAGE`; the app must already
    be installed on the phone.
 5. For offline work, run `bun run check` (tests, typecheck, build). Do not
    create a device.
@@ -40,7 +40,8 @@ session lifecycle when adapting it.
   signed visitor cookie owns. Everyone else gets a 404.
 - Every demo has a TTL, a reaper that terminates expired sessions, a cap on
   concurrent phones, a per-visitor rate limit, and cleanup on shutdown. Do not
-  remove one without replacing it.
+  remove one without replacing it. A session is only marked ended after its
+  device is confirmed terminated; keep a failed terminate open for retry.
 - The API has one org key, no per-end-user keys, no metadata on devices, and no
   per-end-user billing. Keep the visitor-to-device mapping in your own store.
 - Keep Mobilerun branding out of the end-user page. Never print or log the API
