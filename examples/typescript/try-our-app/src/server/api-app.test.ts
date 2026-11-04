@@ -1,12 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createApiApp } from './api-app';
-import { parseBrand } from './brand';
 import { createRateLimiter } from './rate-limiter';
 import { createSessionService } from './session-service';
 import { createSessionStore, type SessionStore } from './session-store';
 import { createFakeDevices } from './test-support';
-
-const brand = parseBrand(await Bun.file('brand.json').text());
 
 let openStore: SessionStore | undefined;
 afterEach(() => {
@@ -28,7 +25,6 @@ function setup(options: { rateLimitMax?: number; maxConcurrent?: number } = {}) 
   });
   const app = createApiApp({
     service,
-    brand,
     limiter: createRateLimiter({
       max: options.rateLimitMax ?? 10,
       windowMs: 60_000,
@@ -51,7 +47,11 @@ async function startSession(app: ReturnType<typeof setup>['app'], cookie?: strin
   return {
     response,
     cookie: cookie ?? cookieFrom(response),
-    body: (await response.json()) as { id: string; expiresAt: string; error?: string },
+    body: (await response.json()) as {
+      id: string;
+      expiresInSeconds: number;
+      error?: string;
+    },
   };
 }
 
@@ -59,8 +59,7 @@ describe('API contracts', () => {
   test('reports a missing server API key without crashing', async () => {
     const app = createApiApp({
       service: null,
-      brand,
-      limiter: createRateLimiter({ max: 1, windowMs: 1_000 }),
+        limiter: createRateLimiter({ max: 1, windowMs: 1_000 }),
       cookieSecret: 'test-secret-that-is-long-enough',
     });
 
@@ -76,12 +75,6 @@ describe('API contracts', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  test('serves the validated brand', async () => {
-    const { app } = setup();
-    const response = await app.request('/api/brand');
-    expect(((await response.json()) as { name: string }).name).toBe('Fernly');
-  });
-
   test('starts a demo, sets a signed visitor cookie and resumes on repeat', async () => {
     const { app, devices } = setup();
 
@@ -89,6 +82,7 @@ describe('API contracts', () => {
     expect(first.response.status).toBe(201);
     expect(first.response.headers.get('set-cookie')).toContain('HttpOnly');
     expect(first.cookie).toStartWith('visitor=');
+    expect(first.body.expiresInSeconds).toBe(300);
 
     const again = await startSession(app, first.cookie);
     expect(again.response.status).toBe(200);
@@ -169,10 +163,13 @@ describe('limits', () => {
     expect(second.response.status).toBe(429);
     expect(second.body.error).toBe('rate_limited');
     expect(Number(second.response.headers.get('Retry-After'))).toBeGreaterThan(0);
+    expect(second.response.headers.get('Cache-Control')).toBe('no-store');
 
-    // A fresh cookie from the same address is still limited by IP.
+    // A fresh cookie from the same address is still limited by IP, and the
+    // new cookie is still delivered with the error.
     const third = await startSession(app);
     expect(third.response.status).toBe(429);
+    expect(third.cookie).toStartWith('visitor=');
   });
 
   test('answers 503 when every demo phone is busy', async () => {

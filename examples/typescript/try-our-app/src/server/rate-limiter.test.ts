@@ -25,19 +25,26 @@ describe('rate limiter', () => {
 
     expect(limiter.consume(['ip:2', 'visitor:a']).allowed).toBe(false);
     expect(limiter.consume(['ip:2', 'visitor:b']).allowed).toBe(true);
+    expect(limiter.consume(['ip:2', 'visitor:c']).allowed).toBe(false);
   });
 
-  test('bounds the number of tracked keys', () => {
+  test('refuses new keys when full of live windows instead of erasing counters', () => {
+    let clock = 0;
     const limiter = createRateLimiter({
       max: 1,
       windowMs: 60_000,
       maxKeys: 2,
-      now: () => 0,
+      now: () => clock,
     });
     limiter.consume(['a']);
     limiter.consume(['b']);
-    limiter.consume(['c']);
 
+    expect(limiter.consume(['c'])).toEqual({ allowed: false, retryAfterSeconds: 60 });
+    // The counters that were already there are intact.
+    expect(limiter.consume(['a']).allowed).toBe(false);
+
+    clock += 60_000;
+    expect(limiter.consume(['c']).allowed).toBe(true);
     expect(limiter.consume(['a']).allowed).toBe(true);
   });
 });

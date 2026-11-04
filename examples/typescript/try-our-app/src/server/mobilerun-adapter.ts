@@ -8,10 +8,11 @@ import type { DemoDeviceDeps } from './session-service';
 export function createMobilerunDeviceDeps(client: Mobilerun): DemoDeviceDeps {
   return {
     async createDevice({ name }) {
-      const device = await client.devices.create({
-        deviceType: 'android_cloud_phone',
-        name,
-      });
+      // No automatic retries: a retried create could leave a second, untracked phone.
+      const device = await client.devices.create(
+        { deviceType: 'android_cloud_phone', name },
+        { maxRetries: 0 },
+      );
       return { deviceId: device.id };
     },
     async waitReady(deviceId, { timeoutMs, signal }) {

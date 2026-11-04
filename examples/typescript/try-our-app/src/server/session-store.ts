@@ -2,8 +2,12 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-export type SessionState = 'provisioning' | 'live' | 'ended';
-export type EndReason = 'user' | 'expired' | 'failed' | 'shutdown';
+/**
+ * `ending` means a terminate is owed: the row stays open (and keeps its
+ * concurrency slot) until the device is confirmed gone.
+ */
+export type SessionState = 'provisioning' | 'live' | 'ending' | 'ended';
+export type CloseReason = 'user' | 'expired' | 'failed' | 'shutdown';
 
 export type SessionRecord = {
   id: string;
@@ -12,7 +16,7 @@ export type SessionRecord = {
   state: SessionState;
   createdAt: number;
   expiresAt: number;
-  endReason: EndReason | null;
+  endReason: CloseReason | null;
 };
 
 export type SessionPatch = Partial<
@@ -22,7 +26,8 @@ export type SessionPatch = Partial<
 export interface SessionStore {
   insert: (record: SessionRecord) => void;
   get: (id: string) => SessionRecord | undefined;
-  findOpenByVisitor: (visitorId: string) => SessionRecord | undefined;
+  /** The visitor's session that is booting or running. */
+  findActiveByVisitor: (visitorId: string) => SessionRecord | undefined;
   countOpen: () => number;
   listOpen: () => Array<SessionRecord>;
   update: (id: string, patch: SessionPatch) => void;
@@ -36,7 +41,7 @@ type Row = {
   state: SessionState;
   created_at: number;
   expires_at: number;
-  end_reason: EndReason | null;
+  end_reason: CloseReason | null;
 };
 
 function toRecord(row: Row): SessionRecord {
@@ -76,7 +81,7 @@ export function createSessionStore(path: string): SessionStore {
   );
   const select = db.query<Row, [string]>('SELECT * FROM sessions WHERE id = ?');
   const selectByVisitor = db.query<Row, [string]>(
-    `SELECT * FROM sessions WHERE visitor_id = ? AND state != 'ended'
+    `SELECT * FROM sessions WHERE visitor_id = ? AND state IN ('provisioning', 'live')
      ORDER BY created_at DESC LIMIT 1`,
   );
   const count = db.query<{ total: number }, []>(
@@ -102,7 +107,7 @@ export function createSessionStore(path: string): SessionStore {
       const row = select.get(id);
       return row ? toRecord(row) : undefined;
     },
-    findOpenByVisitor(visitorId) {
+    findActiveByVisitor(visitorId) {
       const row = selectByVisitor.get(visitorId);
       return row ? toRecord(row) : undefined;
     },

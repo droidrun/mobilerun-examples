@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { parseBrand } from './brand';
 import { normalizeApiBaseUrl, readServerConfig } from './config';
 
 describe('server config', () => {
@@ -21,14 +20,8 @@ describe('server config', () => {
       production: false,
       appPackage: 'com.android.chrome',
       sessionTtlMs: 300_000,
-      reaperIntervalMs: 15_000,
-      provisionTimeoutMs: 120_000,
       maxConcurrentSessions: 3,
       rateLimitMax: 3,
-      rateLimitWindowMs: 3_600_000,
-      cookieSecret: undefined,
-      sessionsDbPath: 'data/sessions.sqlite',
-      brandFile: 'brand.json',
     });
   });
 
@@ -36,10 +29,8 @@ describe('server config', () => {
     const config = readServerConfig({
       DEMO_APP_PACKAGE: 'com.example.shop',
       SESSION_TTL_SECONDS: '120',
-      REAPER_INTERVAL_SECONDS: '5',
       MAX_CONCURRENT_SESSIONS: '10',
       RATE_LIMIT_MAX: '1',
-      RATE_LIMIT_WINDOW_SECONDS: '60',
       MOBILERUN_CLOUD_API_KEY: '',
     });
 
@@ -47,10 +38,8 @@ describe('server config', () => {
       apiKey: undefined,
       appPackage: 'com.example.shop',
       sessionTtlMs: 120_000,
-      reaperIntervalMs: 5_000,
       maxConcurrentSessions: 10,
       rateLimitMax: 1,
-      rateLimitWindowMs: 60_000,
     });
   });
 
@@ -59,17 +48,5 @@ describe('server config', () => {
     expect(() => readServerConfig({ SESSION_TTL_SECONDS: '0' })).toThrow();
     expect(() => readServerConfig({ MAX_CONCURRENT_SESSIONS: '-1' })).toThrow();
     expect(() => readServerConfig({ PORT: '99999' })).toThrow();
-    expect(() => readServerConfig({ COOKIE_SECRET: 'short' })).toThrow();
-  });
-});
-
-describe('brand file', () => {
-  test('accepts the bundled brand and rejects unsafe colors', async () => {
-    const source = await Bun.file('brand.json').text();
-    expect(parseBrand(source).name).toBe('Fernly');
-
-    const unsafe = JSON.parse(source) as { colors: Record<string, string> };
-    unsafe.colors.primary = 'red; background: url(x)';
-    expect(() => parseBrand(JSON.stringify(unsafe))).toThrow();
   });
 });

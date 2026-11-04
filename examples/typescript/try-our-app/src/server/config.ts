@@ -1,13 +1,10 @@
 import { z } from 'zod';
 
-const seconds = (fallback: number, min = 1) =>
-  z.coerce
-    .number()
-    .int()
-    .min(min)
-    .max(86_400)
-    .default(fallback)
-    .transform((value) => value * 1_000);
+// Operational knobs that rarely need changing are constants, not env vars.
+export const REAPER_INTERVAL_MS = 15_000;
+export const PROVISION_TIMEOUT_MS = 120_000;
+export const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1_000;
+export const SESSIONS_DB_PATH = 'data/sessions.sqlite';
 
 const serverConfigSchema = z.object({
   apiKey: z.string().trim().min(1).optional(),
@@ -21,15 +18,14 @@ const serverConfigSchema = z.object({
       /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/,
       'DEMO_APP_PACKAGE must be an Android package name.',
     ),
-  sessionTtlMs: seconds(300, 10),
-  reaperIntervalMs: seconds(15),
-  provisionTimeoutMs: seconds(120, 10),
+  sessionTtlMs: z.coerce
+    .number()
+    .int()
+    .min(10)
+    .max(3_600)
+    .transform((seconds) => seconds * 1_000),
   maxConcurrentSessions: z.coerce.number().int().min(1).max(100),
   rateLimitMax: z.coerce.number().int().min(1).max(1_000),
-  rateLimitWindowMs: seconds(3_600),
-  cookieSecret: z.string().min(16).optional(),
-  sessionsDbPath: z.string().min(1),
-  brandFile: z.string().min(1),
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
@@ -58,14 +54,8 @@ export function readServerConfig(
     port: read('PORT') ?? 3_000,
     production: environment.NODE_ENV === 'production',
     appPackage: read('DEMO_APP_PACKAGE') ?? 'com.android.chrome',
-    sessionTtlMs: read('SESSION_TTL_SECONDS'),
-    reaperIntervalMs: read('REAPER_INTERVAL_SECONDS'),
-    provisionTimeoutMs: read('PROVISION_TIMEOUT_SECONDS'),
+    sessionTtlMs: read('SESSION_TTL_SECONDS') ?? 300,
     maxConcurrentSessions: read('MAX_CONCURRENT_SESSIONS') ?? 3,
     rateLimitMax: read('RATE_LIMIT_MAX') ?? 3,
-    rateLimitWindowMs: read('RATE_LIMIT_WINDOW_SECONDS'),
-    cookieSecret: read('COOKIE_SECRET'),
-    sessionsDbPath: read('SESSIONS_DB_PATH') ?? 'data/sessions.sqlite',
-    brandFile: read('BRAND_FILE') ?? 'brand.json',
   });
 }

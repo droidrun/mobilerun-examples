@@ -1,17 +1,21 @@
 import Mobilerun from '@mobilerun/sdk';
 import index from '../index.html';
 import { createApiApp } from './server/api-app';
-import { loadBrand } from './server/brand';
-import { readServerConfig } from './server/config';
+import {
+  PROVISION_TIMEOUT_MS,
+  RATE_LIMIT_WINDOW_MS,
+  REAPER_INTERVAL_MS,
+  SESSIONS_DB_PATH,
+  readServerConfig,
+} from './server/config';
 import { createMobilerunDeviceDeps } from './server/mobilerun-adapter';
 import { createRateLimiter } from './server/rate-limiter';
 import { createSessionService } from './server/session-service';
 import { createSessionStore } from './server/session-store';
 
 const config = readServerConfig(process.env);
-const brand = loadBrand(config.brandFile);
 
-const store = createSessionStore(config.sessionsDbPath);
+const store = createSessionStore(SESSIONS_DB_PATH);
 const service = config.apiKey
   ? createSessionService({
       deps: createMobilerunDeviceDeps(
@@ -23,25 +27,20 @@ const service = config.apiKey
       store,
       appPackage: config.appPackage,
       ttlMs: config.sessionTtlMs,
-      provisionTimeoutMs: config.provisionTimeoutMs,
+      provisionTimeoutMs: PROVISION_TIMEOUT_MS,
       maxConcurrent: config.maxConcurrentSessions,
     })
   : null;
 
-if (!config.cookieSecret) {
-  console.warn(
-    'COOKIE_SECRET is not set. Using a random secret; visitor cookies reset on restart.',
-  );
-}
-
 const app = createApiApp({
   service,
-  brand,
   limiter: createRateLimiter({
     max: config.rateLimitMax,
-    windowMs: config.rateLimitWindowMs,
+    windowMs: RATE_LIMIT_WINDOW_MS,
   }),
-  cookieSecret: config.cookieSecret ?? crypto.randomUUID(),
+  // Random per start: visitor cookies reset on restart. Replace the anonymous
+  // cookie with your own authentication before production.
+  cookieSecret: crypto.randomUUID(),
   secureCookies: config.production,
 });
 
@@ -66,9 +65,9 @@ const server = Bun.serve({
       },
 });
 
-// Sweep expired demos now (a restart may have left some) and then on a timer.
+// Sweep now (a restart may have left expired demos) and then on a timer.
 const reaper = service
-  ? setInterval(() => void service.reap(), config.reaperIntervalMs)
+  ? setInterval(() => void service.reap(), REAPER_INTERVAL_MS)
   : null;
 void service?.reap();
 
@@ -97,4 +96,4 @@ if (import.meta.hot) {
   });
 }
 
-console.log(`${brand.name} live demo: http://${config.host}:${config.port}`);
+console.log(`Live demo: http://${config.host}:${config.port}`);

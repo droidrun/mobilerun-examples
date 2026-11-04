@@ -1,9 +1,5 @@
 import type { SessionView, StreamView } from '@/shared/contracts';
-import type {
-  EndReason,
-  SessionRecord,
-  SessionStore,
-} from './session-store';
+import type { CloseReason, SessionStore } from './session-store';
 
 /** The device operations the demo needs. The only SDK-facing seam. */
 export type DemoDeviceDeps = {
@@ -21,22 +17,29 @@ export type DemoDeviceDeps = {
 export class DemoError extends Error {
   readonly code: string;
   readonly status: number;
+  readonly headers: Record<string, string>;
 
-  constructor(code: string, status: number, message: string) {
+  constructor(
+    code: string,
+    status: number,
+    message: string,
+    headers: Record<string, string> = {},
+  ) {
     super(message);
     this.name = 'DemoError';
     this.code = code;
     this.status = status;
+    this.headers = headers;
   }
 }
 
 export interface SessionService {
-  /** The visitor's running demo, if any. Throws while one is still booting. */
+  /** The visitor's running demo, if any. */
   current: (visitorId: string) => SessionView | undefined;
   start: (visitorId: string) => Promise<SessionView>;
   stream: (sessionId: string, visitorId: string) => Promise<StreamView>;
   end: (sessionId: string, visitorId: string) => Promise<void>;
-  /** Terminates every expired session. Safe to call on a timer. */
+  /** Terminates expired sessions and retries owed terminates. Safe on a timer. */
   reap: () => Promise<void>;
   /** Stops new starts, then terminates every open session. */
   shutdown: () => Promise<void>;
@@ -73,42 +76,17 @@ export function createSessionService({
   newId = () => crypto.randomUUID(),
 }: SessionServiceOptions): SessionService {
   const abort = new AbortController();
-  const inflight = new Set<Promise<unknown>>();
-  let closing = false;
+  const starts = new Map<string, Promise<void>>();
+  const terminations = new Map<string, Promise<void>>();
+  let shuttingDown = false;
   let reaping = false;
 
-  const view = (record: Pick<SessionRecord, 'id' | 'expiresAt'>): SessionView => ({
-    id: record.id,
-    expiresAt: new Date(record.expiresAt).toISOString(),
-    serverTime: new Date(now()).toISOString(),
+  const view = (id: string, expiresAt: number): SessionView => ({
+    id,
+    expiresInSeconds: Math.max(0, Math.round((expiresAt - now()) / 1_000)),
   });
 
-  const assertRunning = () => {
-    if (closing) {
-      throw new DemoError(
-        'shutting_down',
-        503,
-        'The demo is restarting. Try again in a moment.',
-      );
-    }
-  };
-
-  /** Terminates the device, then records the end. Keeps the row open on failure so the reaper retries. */
-  const close = async (
-    record: SessionRecord,
-    reason: EndReason,
-  ): Promise<void> => {
-    if (record.deviceId) {
-      try {
-        await deps.terminate(record.deviceId);
-      } catch (error) {
-        if (!isGone(error)) throw error;
-      }
-    }
-    store.update(record.id, { state: 'ended', endReason: reason });
-  };
-
-  const owned = (sessionId: string, visitorId: string): SessionRecord => {
+  const owned = (sessionId: string, visitorId: string) => {
     const record = store.get(sessionId);
     if (!record || record.visitorId !== visitorId) {
       throw new DemoError('not_found', 404, 'Demo session not found.');
@@ -116,50 +94,115 @@ export function createSessionService({
     return record;
   };
 
+  /**
+   * Terminates the session's device and only then marks the row ended. A
+   * failed terminate leaves the row `ending`, so it keeps its slot and the
+   * reaper retries it. A device that is already gone (404) counts as done.
+   */
+  const terminateDevice = async (
+    id: string,
+    reason: CloseReason,
+  ): Promise<void> => {
+    const record = store.get(id);
+    if (!record || record.state === 'ended') return;
+    store.update(id, { state: 'ending', endReason: record.endReason ?? reason });
+    if (record.deviceId) {
+      try {
+        await deps.terminate(record.deviceId);
+      } catch (error) {
+        if (!isGone(error)) throw error;
+      }
+    }
+    store.update(id, { state: 'ended' });
+  };
+
+  /**
+   * The one close path for end, reap and shutdown. Concurrent callers share one
+   * pending promise. A session that is still booting is only marked `ending`;
+   * its start flow owns the device it is about to receive and terminates it.
+   */
+  const close = (id: string, reason: CloseReason): Promise<void> => {
+    const pending = terminations.get(id);
+    if (pending) return pending;
+    const run = (async () => {
+      const booting = starts.get(id);
+      if (booting) {
+        const record = store.get(id);
+        if (record?.state === 'provisioning') {
+          store.update(id, { state: 'ending', endReason: reason });
+        }
+        await booting.catch(() => {});
+      }
+      await terminateDevice(id, reason);
+    })().finally(() => terminations.delete(id));
+    terminations.set(id, run);
+    return run;
+  };
+
+  const assertStarting = (id: string) => {
+    if (shuttingDown) {
+      throw new DemoError(
+        'shutting_down',
+        503,
+        'The demo is restarting. Try again in a moment.',
+      );
+    }
+    if (store.get(id)?.state !== 'provisioning') {
+      throw new DemoError(
+        'session_closed',
+        410,
+        'The demo ended before it was ready.',
+      );
+    }
+  };
+
   const provision = async (id: string): Promise<void> => {
-    let deviceId: string | null = null;
     try {
-      deviceId = (await deps.createDevice({ name: `demo-${id}` })).deviceId;
+      const { deviceId } = await deps.createDevice({ name: `demo-${id}` });
       store.update(id, { deviceId });
-      assertRunning();
+      assertStarting(id);
       await deps.waitReady(deviceId, {
         timeoutMs: provisionTimeoutMs,
         signal: abort.signal,
       });
-      assertRunning();
+      assertStarting(id);
       await deps.enableKiosk(deviceId, appPackage);
-      assertRunning();
+      assertStarting(id);
       await deps.startApp(deviceId, appPackage);
-      assertRunning();
+      assertStarting(id);
+      store.update(id, { state: 'live', expiresAt: now() + ttlMs });
     } catch (error) {
-      if (deviceId) {
-        await deps.terminate(deviceId).catch((terminateError: unknown) => {
-          if (!isGone(terminateError)) {
-            console.error('terminate after failed start failed', terminateError);
-          }
-        });
-      }
-      store.update(id, { state: 'ended', endReason: 'failed' });
+      // Includes a device that arrived after the session was already closed.
+      await terminateDevice(id, 'failed').catch((cleanupError: unknown) => {
+        console.error(`cleanup owed for session ${id}`, cleanupError);
+      });
       throw error;
     }
   };
 
   return {
     current(visitorId) {
-      const record = store.findOpenByVisitor(visitorId);
-      if (!record) return undefined;
-      if (record.state === 'provisioning') {
+      const record = store.findActiveByVisitor(visitorId);
+      return record?.state === 'live' && record.expiresAt > now()
+        ? view(record.id, record.expiresAt)
+        : undefined;
+    },
+
+    async start(visitorId) {
+      if (shuttingDown) {
+        throw new DemoError(
+          'shutting_down',
+          503,
+          'The demo is restarting. Try again in a moment.',
+        );
+      }
+      if (store.findActiveByVisitor(visitorId)?.state === 'provisioning') {
         throw new DemoError(
           'session_provisioning',
           409,
           'Your demo is still starting.',
         );
       }
-      return record.expiresAt > now() ? view(record) : undefined;
-    },
-
-    async start(visitorId) {
-      assertRunning();
       if (store.countOpen() >= maxConcurrent) {
         throw new DemoError(
           'capacity_reached',
@@ -182,48 +225,47 @@ export function createSessionService({
       });
 
       const work = provision(id);
-      inflight.add(work);
+      starts.set(id, work);
       try {
         await work;
       } finally {
-        inflight.delete(work);
+        starts.delete(id);
       }
-
-      const expiresAt = now() + ttlMs;
-      store.update(id, { state: 'live', expiresAt });
-      return view({ id, expiresAt });
+      return view(id, now() + ttlMs);
     },
 
     async stream(sessionId, visitorId) {
       const record = owned(sessionId, visitorId);
-      if (record.state === 'ended' || record.expiresAt <= now()) {
-        throw new DemoError('session_ended', 410, 'This demo has ended.');
-      }
-      if (record.state === 'provisioning' || !record.deviceId) {
+      if (record.state === 'provisioning') {
         throw new DemoError(
           'session_provisioning',
           409,
           'Your demo is still starting.',
         );
       }
+      if (
+        record.state !== 'live' ||
+        record.expiresAt <= now() ||
+        !record.deviceId
+      ) {
+        throw new DemoError('session_ended', 410, 'This demo has ended.');
+      }
       return deps.retrieveStream(record.deviceId);
     },
 
     async end(sessionId, visitorId) {
       const record = owned(sessionId, visitorId);
-      if (record.state === 'ended') return;
-      await close(record, 'user');
+      if (record.state !== 'ended') await close(record.id, 'user');
     },
 
     async reap() {
       if (reaping) return;
       reaping = true;
       try {
-        const currentTime = now();
         for (const record of store.listOpen()) {
-          if (record.expiresAt > currentTime) continue;
+          if (record.state !== 'ending' && record.expiresAt > now()) continue;
           try {
-            await close(record, 'expired');
+            await close(record.id, 'expired');
           } catch (error) {
             console.error(`terminate failed for session ${record.id}`, error);
           }
@@ -234,12 +276,12 @@ export function createSessionService({
     },
 
     async shutdown() {
-      closing = true;
+      shuttingDown = true;
       abort.abort();
-      await Promise.allSettled([...inflight]);
+      await Promise.allSettled([...starts.values()]);
       for (const record of store.listOpen()) {
         try {
-          await close(record, 'shutdown');
+          await close(record.id, 'shutdown');
         } catch (error) {
           console.error(`terminate failed for session ${record.id}`, error);
         }
