@@ -1,0 +1,18 @@
+// Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical.
+import brandJson from '../../brand.json';
+
+/** Company, product name, tagline, accent colour and a 24×24 SVG path for the logo mark. */
+export const brand = brandJson;
+
+/** White or near-black text, whichever reads better on a #rrggbb colour. */
+function inkOn(hex: string): string {
+  const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? '#141a16' : '#ffffff';
+}
+
+/** Sets the two brand variables once, before the first render; theme.css derives the rest. */
+export function applyBrand(root: HTMLElement = document.documentElement): void {
+  if (!/^#[0-9a-f]{6}$/i.test(brand.accent)) throw new Error('brand.json: accent must be #rrggbb');
+  root.style.setProperty('--accent', brand.accent);
+  root.style.setProperty('--accent-ink', inkOn(brand.accent));
+}
