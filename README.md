@@ -32,6 +32,7 @@
 | Language | Example | What it demonstrates |
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
+| TypeScript | [Try our app live](examples/typescript/try-our-app/) | A white-label demo: a disposable Android cloud phone locked to one app in kiosk mode, with a session limit, rate limiting, and automatic cleanup |
 | Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
 
 Each example is self-contained, runnable, and documents the decisions you
@@ -50,6 +51,18 @@ bun run dev
 
 Open the [task runner guide](examples/typescript/task-runner/README.md) for its
 server-only API key model and verification commands.
+
+### TypeScript try-our-app
+
+```bash
+cd examples/typescript/try-our-app
+bun install
+cp .env.example .env
+bun run dev
+```
+
+Open the [try-our-app guide](examples/typescript/try-our-app/README.md) for its
+limits, branding, and production notes.
 
 ### Python webhook receiver
 

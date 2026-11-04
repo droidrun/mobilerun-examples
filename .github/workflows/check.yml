@@ -35,3 +35,15 @@ jobs:
         run: bun install --frozen-lockfile
       - working-directory: examples/typescript/task-runner
         run: bun run check
+
+  try-our-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - working-directory: examples/typescript/try-our-app
+        run: bun install --frozen-lockfile
+      - working-directory: examples/typescript/try-our-app
+        run: bun run check
