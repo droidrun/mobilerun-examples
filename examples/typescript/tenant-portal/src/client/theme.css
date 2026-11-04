@@ -44,7 +44,8 @@ a { color: var(--accent-text); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--s-3); }
 
 /* Shell: 56px top bar, 1040px content, two columns from 900px: a text column of up to 420px
-   and a figure (the phone). `.split-fill` lets the second column take the rest instead. */
+   and a figure (the phone), centred together with a fixed gap so wide screens keep no empty
+   middle. `.split-fill` lets the second column take the rest instead. */
 .topbar { height: 56px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .topbar-inner, .content {
   width: min(1040px, 100%); margin-inline: auto; padding-inline: var(--s-4);
@@ -63,7 +64,8 @@ a { color: var(--accent-text); }
   .content { padding-block: var(--s-12); }
   .split {
     grid-template-columns: minmax(0, 420px) auto;
-    justify-content: space-between;
+    justify-content: center;
+    column-gap: var(--s-12);
     align-items: center;
   }
   .split-fill { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
