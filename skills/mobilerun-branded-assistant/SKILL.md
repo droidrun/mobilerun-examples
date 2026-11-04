@@ -21,15 +21,18 @@ what a white-label product adds on top of it.
 2. Adapt the persona, prompt and limits in `assistant.json`, and the presets
    (each with a zod output schema) in `src/server/assistant.ts`.
 3. To rebrand, edit `brand.json`. `src/client/theme.css`, `src/client/brand.ts`
-   and `src/client/components/{app-shell,phone-frame}.tsx` are shared verbatim
-   with the other white-label examples; keep them generic and put page styles
-   in `src/styles.css`.
+   and `src/client/components/app-shell.tsx` (app shell, notice) are shared
+   verbatim with the other white-label examples; keep them generic and put page
+   styles in `src/styles.css`. This example has no phone frame and does not
+   depend on `@mobilerun/react`.
 4. Every SDK call, the watcher and settlement live in
-   `src/server/assistant-service.ts`; the ledger in `src/server/ledger.ts`.
-   Tests fake the SDK client and use an in-memory SQLite database.
-5. Replace the stub identity in `src/server/api-app.ts` with real
-   authentication before any shared deployment; the routes only read the user
-   id. With the stub, clearing cookies resets the budget.
+   `src/server/assistant-service.ts`; the ledger in `src/server/ledger.ts`; the
+   environment is read in `src/server/config.ts`; `src/server/api-app.ts` holds
+   the routes and the one error mapping. Tests fake the SDK client and use an
+   in-memory SQLite database.
+5. Identity is a stub (`// STUB:` in `src/server/api-app.ts`): replace it with
+   real authentication before any shared deployment; the routes only read the
+   user id. With the stub, clearing cookies resets the budget.
 6. For offline work run `bun run check` in the example directory. Do not start a
    real task unless the user explicitly asks; say that it consumes organization
    credits.
@@ -54,9 +57,12 @@ what a white-label product adds on top of it.
   Past `executionTimeout` plus a margin, stop the task, settle, free the phone.
 - Validate task output with the preset's zod schema; show unreadable output as
   text, never as a card. Surface `sendMessage` returning `sent: false`.
-- Keep the API's status for its errors; map its text to your own copy for a
-  white-label product. Add no client-side gates for devices, quotas or
-  permissions the server decides.
+- Keep the API's status and text for its 4xx errors and turn a `401`/`403` or
+  5xx into a plain `502`; map the text to your own copy for a white-label
+  product. Add no client-side gates for devices, quotas or permissions the
+  server decides. Keep `hono/csrf` on `/api/*`.
+- In the browser, drop a late answer about a run that is no longer the current
+  one, and show a quiet notice while polling this server fails.
 - One active run per phone and one process: the locks and the watcher are in
   memory. Only use `android_cloud_phone` devices. Do not mention Mobilerun in
   end-user UI copy.
