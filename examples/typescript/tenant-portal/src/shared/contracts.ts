@@ -45,3 +45,11 @@ export const apiErrorSchema = z.object({
 });
 
 export type ApiError = z.infer<typeof apiErrorSchema>;
+
+export const DEVICE_ACTIONS = deviceActionSchema.options;
+
+export type StreamView = StreamCredentials;
+
+export type Me = Session;
+
+export type ErrorBody = ApiError;

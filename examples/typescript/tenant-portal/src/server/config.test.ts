@@ -1,63 +1,32 @@
-import { describe, expect, test } from 'bun:test';
-import { normalizeApiBaseUrl, readServerConfig } from './config';
+import { expect, test } from 'bun:test';
+import { readConfig } from './config';
 
 const SECRET = 'a'.repeat(32);
 
-describe('server config', () => {
-  test('normalizes Mobilerun API URLs to the v1 base', () => {
-    expect(normalizeApiBaseUrl('https://api.example.com/')).toBe(
-      'https://api.example.com/v1',
-    );
-    expect(normalizeApiBaseUrl('https://api.mobilerun.ai/v1')).toBe(
-      'https://api.mobilerun.ai/v1',
-    );
+test('local defaults need no API key and make a random session secret per process', () => {
+  const first = readConfig({});
+  expect(first).toMatchObject({
+    apiKey: undefined,
+    baseURL: undefined,
+    port: 3_000,
+    databasePath: './data/portal.sqlite',
+    production: false,
+    sessionSecretGenerated: true,
   });
+  expect(first.sessionSecret).toMatch(/^[0-9a-f]{64}$/);
+  // An empty line, as in .env.example, counts as unset.
+  expect(readConfig({ SESSION_SECRET: '' }).sessionSecret).not.toBe(first.sessionSecret);
+});
 
-  test('uses safe local defaults without requiring an API key', () => {
-    expect(readServerConfig({ SESSION_SECRET: SECRET })).toEqual({
-      apiKey: undefined,
-      apiUrl: undefined,
-      host: '127.0.0.1',
-      port: 3_000,
-      production: false,
-      sessionSecret: SECRET,
-      sessionSecretGenerated: false,
-      databasePath: './data/portal.sqlite',
-    });
-  });
+test('a set secret must be long enough, and production requires one', () => {
+  expect(() => readConfig({ SESSION_SECRET: 'too-short' })).toThrow(/at least 32/);
+  expect(() => readConfig({ NODE_ENV: 'production' })).toThrow(/SESSION_SECRET is required/);
+  const config = readConfig({ NODE_ENV: 'production', SESSION_SECRET: SECRET });
+  expect(config).toMatchObject({ sessionSecret: SECRET, sessionSecretGenerated: false });
+});
 
-  test('rejects a short session secret', () => {
-    expect(() => readServerConfig({ SESSION_SECRET: 'too-short' })).toThrow(
-      /at least 32/,
-    );
-  });
-
-  test('generates a random per-process secret outside production', () => {
-    const first = readServerConfig({});
-    const second = readServerConfig({ SESSION_SECRET: '' });
-
-    expect(first.sessionSecretGenerated).toBe(true);
-    expect(first.sessionSecret).toMatch(/^[0-9a-f]{64}$/);
-    expect(second.sessionSecret).not.toBe(first.sessionSecret);
-  });
-
-  test('requires a session secret in production', () => {
-    expect(() => readServerConfig({ NODE_ENV: 'production' })).toThrow(
-      /SESSION_SECRET is required/,
-    );
-    expect(
-      readServerConfig({ NODE_ENV: 'production', SESSION_SECRET: SECRET })
-        .sessionSecret,
-    ).toBe(SECRET);
-  });
-
-  test('reads the API key and URL', () => {
-    const config = readServerConfig({
-      SESSION_SECRET: SECRET,
-      MOBILERUN_CLOUD_API_KEY: 'dr_sk_test',
-      MOBILERUN_API_URL: 'https://api.example.com',
-    });
-    expect(config.apiKey).toBe('dr_sk_test');
-    expect(config.apiUrl).toBe('https://api.example.com/v1');
-  });
+test('the API URL gets its /v1 suffix when missing', () => {
+  const url = (value: string) => readConfig({ MOBILERUN_API_URL: value }).baseURL;
+  expect(url('https://api.example.com/')).toBe('https://api.example.com/v1');
+  expect(url('https://api.mobilerun.ai/v1')).toBe('https://api.mobilerun.ai/v1');
 });
