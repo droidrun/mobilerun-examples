@@ -4,7 +4,7 @@ import type { PublicPreset } from '@/shared/contracts';
 type ComposerProps = {
   presets: Array<PublicPreset>;
   disabled: boolean;
-  start: (input: { presetId: string; message: string }) => Promise<void>;
+  start: (input: { presetId: string; message: string }) => Promise<boolean>;
 };
 
 export function Composer({ presets, disabled, start }: ComposerProps) {
@@ -18,8 +18,8 @@ export function Composer({ presets, disabled, start }: ComposerProps) {
     const trimmed = message.trim();
     if (!trimmed || !presetId || disabled || sending) return;
     setSending(true);
-    await start({ presetId, message: trimmed });
-    setMessage('');
+    // Keep the text when the start failed, so the user can try again.
+    if (await start({ presetId, message: trimmed })) setMessage('');
     setSending(false);
   };
 

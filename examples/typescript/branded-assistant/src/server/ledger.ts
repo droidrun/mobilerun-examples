@@ -8,27 +8,33 @@ import { isTerminalStatus, type RunStatus } from '@/shared/contracts';
  * API key; it has no per-end-user accounts, so each end user's budget lives
  * here, in your database.
  *
+ * SINGLE PROCESS. Reserve and settle are atomic in SQLite, but the rest of the
+ * server (phone locks, the watcher) lives in one process's memory. Run one
+ * instance, or move all of it into a shared store first.
+ *
  * Money flow for one run: reserve → (run) → settle.
- *   reserve: subtract `reserved` from the balance, atomically and only if the
- *            balance covers it;
- *   settle:  charge min(credits used, reserved) and give the rest back.
+ *   reserve: subtract the reservation from the balance, atomically and only if
+ *            the balance covers it and the user has no other active run;
+ *   settle:  charge min(credits used, reserved) and give the rest back. When
+ *            the usage is unknown, the whole reservation is charged.
  */
 
-export type RunRow = {
+export type RunRecord = {
   id: string;
-  user_id: string;
-  task_id: string | null;
-  device_id: string;
+  userId: string;
+  taskId: string | null;
+  deviceId: string;
   reserved: number;
-  /** Credits charged. NULL until the run settles; settling happens once. */
-  settled: number | null;
+  /** Credits charged (the `settled` column). null until the run settles. */
+  charged: number | null;
   status: RunStatus;
-  preset_id: string;
+  presetId: string;
   request: string;
-  output: string | null;
+  /** The task output as returned by the API; unvalidated. */
+  output: unknown;
   message: string | null;
   steps: number | null;
-  created_at: string;
+  createdAt: string;
 };
 
 export type ReserveInput = {
@@ -40,45 +46,77 @@ export type ReserveInput = {
   amount: number;
 };
 
+export type ReserveOutcome = 'ok' | 'insufficient' | 'run_active';
+
 export type SettleInput = {
   status: RunStatus;
-  /** Credits the run actually used; clamped to [0, reserved]. */
-  creditsUsed: number;
-  output?: Record<string, unknown> | null;
+  /** Credits used, or null when unknown (charges the whole reservation). */
+  creditsUsed: number | null;
+  output?: unknown;
   message?: string | null;
   steps?: number | null;
 };
 
-export type Settlement = {
-  charged: number;
-  refunded: number;
-  balance: number;
-};
-
 export interface Ledger {
+  /** Never creates an account: unseen users read as the starting budget. */
   balance: (userId: string) => number;
-  reserve: (input: ReserveInput) => { ok: boolean; balance: number };
+  reserve: (input: ReserveInput) => ReserveOutcome;
   attachTask: (runId: string, taskId: string) => void;
+  /** Progress for a run that is still active; ignored for terminal statuses. */
   updateProgress: (
     runId: string,
     progress: { status: RunStatus; steps?: number | null },
   ) => void;
-  /** Returns null when the run is unknown or was already settled. */
-  settle: (runId: string, input: SettleInput) => Settlement | null;
-  getRun: (userId: string, runId: string) => RunRow | undefined;
-  getRunById: (runId: string) => RunRow | undefined;
-  listRuns: (userId: string, limit: number) => Array<RunRow>;
-  openRuns: () => Array<RunRow>;
-  close: () => void;
+  /** True when this call settled the run; false when it was unknown or already settled. */
+  settle: (runId: string, input: SettleInput) => boolean;
+  getRun: (userId: string, runId: string) => RunRecord | undefined;
+  getRunById: (runId: string) => RunRecord | undefined;
+  listRuns: (userId: string, limit: number) => Array<RunRecord>;
+  openRuns: () => Array<RunRecord>;
 }
 
-export function createLedger(
-  path: string,
-  startingBalance: number,
-): Ledger {
+type RunRow = {
+  id: string;
+  user_id: string;
+  task_id: string | null;
+  device_id: string;
+  reserved: number;
+  settled: number | null;
+  status: RunStatus;
+  preset_id: string;
+  request: string;
+  output: string | null;
+  message: string | null;
+  steps: number | null;
+  created_at: string;
+};
+
+function toRecord(row: RunRow): RunRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    taskId: row.task_id,
+    deviceId: row.device_id,
+    reserved: row.reserved,
+    charged: row.settled,
+    status: row.status,
+    presetId: row.preset_id,
+    request: row.request,
+    output: row.output === null ? null : (JSON.parse(row.output) as unknown),
+    message: row.message,
+    steps: row.steps,
+    createdAt: row.created_at,
+  };
+}
+
+export function openDatabase(path: string): Database {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
   if (path !== ':memory:') db.run('PRAGMA journal_mode = WAL');
+  return db;
+}
+
+export function createLedger(db: Database, startingBalance: number): Ledger {
   db.run(`
     CREATE TABLE IF NOT EXISTS accounts (
       user_id TEXT PRIMARY KEY,
@@ -104,7 +142,7 @@ export function createLedger(
   `);
   db.run('CREATE INDEX IF NOT EXISTS runs_user_idx ON runs (user_id, created_at)');
 
-  const ensureAccount = db.query(
+  const insertAccount = db.query(
     'INSERT OR IGNORE INTO accounts (user_id, balance) VALUES (?1, ?2)',
   );
   const readBalance = db.query<{ balance: number }, [string]>(
@@ -116,18 +154,19 @@ export function createLedger(
   const credit = db.query(
     'UPDATE accounts SET balance = balance + ?2 WHERE user_id = ?1',
   );
+  const countOpen = db.query<{ open: number }, [string]>(
+    'SELECT COUNT(*) AS open FROM runs WHERE user_id = ?1 AND settled IS NULL',
+  );
   const insertRun = db.query(
     `INSERT INTO runs
        (id, user_id, device_id, reserved, status, preset_id, request, created_at)
      VALUES (?1, ?2, ?3, ?4, 'starting', ?5, ?6, ?7)`,
   );
-  const selectRunById = db.query<RunRow, [string]>(
-    'SELECT * FROM runs WHERE id = ?1',
-  );
-  const selectRun = db.query<RunRow, [string, string]>(
+  const selectById = db.query<RunRow, [string]>('SELECT * FROM runs WHERE id = ?1');
+  const selectOwned = db.query<RunRow, [string, string]>(
     'SELECT * FROM runs WHERE id = ?1 AND user_id = ?2',
   );
-  const selectRuns = db.query<RunRow, [string, number]>(
+  const selectRecent = db.query<RunRow, [string, number]>(
     'SELECT * FROM runs WHERE user_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2',
   );
   const selectOpen = db.query<RunRow, []>(
@@ -145,17 +184,14 @@ export function createLedger(
      WHERE id = ?1 AND settled IS NULL`,
   );
 
-  const balanceOf = (userId: string): number => {
-    ensureAccount.run(userId, startingBalance);
-    return readBalance.get(userId)?.balance ?? 0;
-  };
+  const balanceOf = (userId: string): number =>
+    readBalance.get(userId)?.balance ?? startingBalance;
 
-  // IMMEDIATE takes the write lock up front, so the check-and-debit is atomic
-  // even when several processes share the database file.
-  const reserveTx = db.transaction((input: ReserveInput) => {
-    ensureAccount.run(input.userId, startingBalance);
-    const { changes } = debit.run(input.userId, input.amount);
-    if (changes === 0) return { ok: false, balance: balanceOf(input.userId) };
+  // The account row appears on the first reservation, never on a read.
+  const reserveTx = db.transaction((input: ReserveInput): ReserveOutcome => {
+    if ((countOpen.get(input.userId)?.open ?? 0) > 0) return 'run_active';
+    insertAccount.run(input.userId, startingBalance);
+    if (debit.run(input.userId, input.amount).changes === 0) return 'insufficient';
     insertRun.run(
       input.runId,
       input.userId,
@@ -165,33 +201,36 @@ export function createLedger(
       input.request,
       new Date().toISOString(),
     );
-    return { ok: true, balance: balanceOf(input.userId) };
+    return 'ok';
   });
 
-  const settleTx = db.transaction(
-    (runId: string, input: SettleInput): Settlement | null => {
-      const run = selectRunById.get(runId);
-      if (!run || run.settled !== null) return null;
-      const charged = Math.min(
-        Math.max(Math.ceil(input.creditsUsed), 0),
-        run.reserved,
-      );
-      const refunded = run.reserved - charged;
-      finishRun.run(
-        runId,
-        charged,
-        input.status,
-        input.output ? JSON.stringify(input.output) : null,
-        input.message ?? null,
-        input.steps ?? null,
-      );
-      if (refunded > 0) credit.run(run.user_id, refunded);
-      return { charged, refunded, balance: balanceOf(run.user_id) };
-    },
-  );
+  const settleTx = db.transaction((runId: string, input: SettleInput): boolean => {
+    const run = selectById.get(runId);
+    if (!run || run.settled !== null) return false;
+    const charged =
+      input.creditsUsed === null
+        ? run.reserved
+        : Math.min(Math.max(Math.ceil(input.creditsUsed), 0), run.reserved);
+    finishRun.run(
+      runId,
+      charged,
+      input.status,
+      input.output === undefined || input.output === null
+        ? null
+        : JSON.stringify(input.output),
+      input.message ?? null,
+      input.steps ?? null,
+    );
+    if (charged < run.reserved) credit.run(run.user_id, run.reserved - charged);
+    return true;
+  });
+
+  const record = (row: RunRow | null): RunRecord | undefined =>
+    row ? toRecord(row) : undefined;
 
   return {
     balance: balanceOf,
+    // IMMEDIATE takes the write lock up front.
     reserve: (input) => reserveTx.immediate(input),
     attachTask(runId, taskId) {
       setTask.run(runId, taskId);
@@ -201,10 +240,9 @@ export function createLedger(
       setProgress.run(runId, progress.status, progress.steps ?? null);
     },
     settle: (runId, input) => settleTx.immediate(runId, input),
-    getRun: (userId, runId) => selectRun.get(runId, userId) ?? undefined,
-    getRunById: (runId) => selectRunById.get(runId) ?? undefined,
-    listRuns: (userId, limit) => selectRuns.all(userId, limit),
-    openRuns: () => selectOpen.all(),
-    close: () => db.close(),
+    getRun: (userId, runId) => record(selectOwned.get(runId, userId)),
+    getRunById: (runId) => record(selectById.get(runId)),
+    listRuns: (userId, limit) => selectRecent.all(userId, limit).map(toRecord),
+    openRuns: () => selectOpen.all().map(toRecord),
   };
 }

@@ -5,6 +5,8 @@ export const runStatusSchema = z.enum([
   'starting',
   'running',
   'cancelling',
+  /** The API did not confirm whether the task started; the server is reconciling. */
+  'unknown',
   'completed',
   'failed',
   'cancelled',
@@ -62,7 +64,7 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
 
 export const timelineEntrySchema = z.object({
   at: z.string(),
-  kind: z.enum(['status', 'agent', 'user']),
+  kind: z.enum(['status', 'user']),
   text: z.string(),
 });
 
@@ -75,18 +77,17 @@ export const runViewSchema = z.object({
   status: runStatusSchema,
   steps: z.number().int().nonnegative().nullable(),
   timeline: z.array(timelineEntrySchema),
-  /** Set while the agent's latest message is a question the user can answer. */
-  question: z.string().nullable(),
+  /** The task output, only when it matches the preset's schema. */
   result: z.record(z.string(), z.unknown()).nullable(),
+  /** Output that did not match the schema, as capped JSON text for display. */
+  rawOutput: z.string().nullable(),
   message: z.string().nullable(),
-  reserved: z.number().int().nonnegative(),
-  /** Credits charged once the run settles; null while it is still running. */
+  /** Set while the server cannot reach the backend for this run. */
+  error: z.string().nullable(),
+  /** Credits charged once the run settles; null while it is still active. */
   charged: z.number().int().nonnegative().nullable(),
   /** The user's balance after this run's reservation or settlement. */
   balance: z.number().int(),
-  createdAt: z.string(),
-  streamUrl: z.string().min(1).optional(),
-  streamToken: z.string().min(1).optional(),
 });
 
 export type RunView = z.infer<typeof runViewSchema>;

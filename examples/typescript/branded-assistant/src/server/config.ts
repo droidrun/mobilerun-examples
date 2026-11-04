@@ -49,7 +49,7 @@ export function readServerConfig(
   const ephemeral = !configuredSecret && !production;
 
   return serverConfigSchema.parse({
-    apiKey: blankToUndefined(environment.MOBILERUN_API_KEY),
+    apiKey: blankToUndefined(environment.MOBILERUN_CLOUD_API_KEY),
     apiUrl: normalizeApiBaseUrl(blankToUndefined(environment.MOBILERUN_API_URL)),
     host: '127.0.0.1',
     port: environment.PORT ?? 3_000,

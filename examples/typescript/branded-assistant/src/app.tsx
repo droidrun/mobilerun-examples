@@ -7,7 +7,7 @@ import { useAssistant } from './client/use-assistant';
 
 export function App() {
   const { state, active, start, reply, cancel, reload, dismissError } = useAssistant();
-  const { session, runs } = state;
+  const { runs } = state;
   const endRef = useRef<HTMLDivElement>(null);
   const lastEntry = runs.at(-1)?.timeline.length ?? 0;
 
@@ -15,15 +15,16 @@ export function App() {
     endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' });
   }, [runs.length, lastEntry, active?.status]);
 
-  const presets = session?.presets ?? [];
-  const notReady = session !== null && (!session.sdkConfigured || session.deviceCount === 0);
+  const { presets } = state;
+  const ready = state.phase === 'ready';
+  const notReady = ready && (!state.sdkConfigured || state.deviceCount === 0);
 
   return (
     <main className="shell">
       <PersonaHeader
-        persona={session?.persona ?? null}
-        balance={session ? state.balance : null}
-        reservePerRun={session?.reservePerRun ?? null}
+        persona={state.persona}
+        balance={state.balance}
+        reservePerRun={state.reservePerRun}
       />
 
       {state.phase === 'failed' ? (
@@ -35,13 +36,13 @@ export function App() {
         </div>
       ) : null}
 
-      {session && !session.sdkConfigured ? (
+      {ready && !state.sdkConfigured ? (
         <div className="notice" role="status">
-          <strong>API key missing.</strong> Set <code>MOBILERUN_API_KEY</code> on the server and
+          <strong>API key missing.</strong> Set <code>MOBILERUN_CLOUD_API_KEY</code> on the server and
           restart. The page works, but requests cannot start yet.
         </div>
       ) : null}
-      {session?.sdkConfigured && session.deviceCount === 0 ? (
+      {ready && state.sdkConfigured && state.deviceCount === 0 ? (
         <div className="notice" role="status">
           <strong>No phones configured.</strong> Add cloud phone ids to <code>DEVICE_IDS</code> on
           the server.
@@ -50,9 +51,9 @@ export function App() {
 
       <section className="thread" aria-live="polite">
         {state.phase === 'loading' ? <p className="muted">Loading…</p> : null}
-        {state.phase === 'ready' && runs.length === 0 ? (
+        {ready && runs.length === 0 ? (
           <div className="bubble bubble-assistant">
-            Hi, I'm {session?.persona.displayName}. Pick a request type and tell me what you need. I
+            Hi, I'm {state.persona?.displayName}. Pick a request type and tell me what you need. I
             look things up on a real phone and show you how it goes.
           </div>
         ) : null}
@@ -78,7 +79,7 @@ export function App() {
         </div>
       ) : null}
 
-      {session ? (
+      {ready ? (
         <Composer presets={presets} disabled={active !== null || notReady} start={start} />
       ) : null}
 

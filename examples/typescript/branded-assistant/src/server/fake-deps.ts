@@ -1,19 +1,28 @@
-import { UpstreamError } from './errors';
+import { Database } from 'bun:sqlite';
+import { z } from 'zod';
 import type {
   AssistantDeps,
   StartTaskInput,
   TaskResultRecord,
   TaskStatusRecord,
-} from './assistant-service';
+} from './assistant-deps';
 import { assistantConfigSchema } from './assistant-config';
-import { createLedger, type Ledger } from './ledger';
 import { createAssistantService } from './assistant-service';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createLedger, type Ledger } from './ledger';
+import type { Preset } from './presets';
 
 export const DEVICE_A = '11111111-1111-4111-8111-111111111111';
 export const DEVICE_B = '22222222-2222-4222-8222-222222222222';
+
+/** Shaped like an SDK APIError: what the real adapter lets through. */
+export class FakeApiError extends Error {
+  readonly status: number | undefined;
+
+  constructor(status: number | undefined, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 type FakeTask = TaskStatusRecord & TaskResultRecord;
 
@@ -25,9 +34,11 @@ export function createFakeDeps() {
     messages: [] as Array<{ taskId: string; message: string }>,
     stops: [] as Array<string>,
   };
-  const control: { startError: UpstreamError | null; stopError: UpstreamError | null } = {
-    startError: null,
-    stopError: null,
+  const control = {
+    startError: null as Error | null,
+    stopError: null as Error | null,
+    statusError: null as Error | null,
+    messageSent: true,
   };
   let counter = 0;
 
@@ -41,29 +52,25 @@ export function createFakeDeps() {
       return { taskId };
     },
     async getStatus(taskId) {
+      if (control.statusError) throw control.statusError;
       const task = tasks.get(taskId);
-      if (!task) throw new UpstreamError(404, 'task not found');
+      if (!task) throw new FakeApiError(404, 'task not found');
       return task;
     },
     async retrieveTask(taskId) {
       const task = tasks.get(taskId);
-      if (!task) throw new UpstreamError(404, 'task not found');
+      if (!task) throw new FakeApiError(404, 'task not found');
       return task;
     },
     async sendMessage(taskId, message) {
       calls.messages.push({ taskId, message });
+      return control.messageSent;
     },
     async stopTask(taskId) {
       calls.stops.push(taskId);
       if (control.stopError) throw control.stopError;
       const task = tasks.get(taskId);
-      if (task) tasks.set(taskId, { ...task, status: 'cancelled', creditsUsed: task.creditsUsed ?? 0 });
-    },
-    async getStream(deviceId) {
-      return {
-        streamUrl: `wss://stream.example/${deviceId}`,
-        streamToken: `token-for-${deviceId}`,
-      };
+      if (task) tasks.set(taskId, { ...task, status: 'cancelled' });
     },
   };
 
@@ -85,55 +92,67 @@ export const testAssistant = assistantConfigSchema.parse({
   llmModel: 'secret/model-id',
   maxSteps: 12,
   executionTimeout: 300,
-  presets: [
-    {
-      id: 'hotel',
-      label: 'Hotel',
-      hint: 'City and dates',
-      instruction: 'Find a hotel.',
-      outputFields: [
-        { key: 'hotelName', label: 'Hotel', type: 'text', description: 'Name' },
-        { key: 'notes', label: 'Notes', type: 'list', description: 'Caveats' },
-      ],
-    },
-  ],
 });
 
-export type Harness = {
-  ledger: Ledger;
-  fake: ReturnType<typeof createFakeDeps>;
-  service: ReturnType<typeof createAssistantService>;
-  cleanup: () => void;
-};
+export const testPresets: ReadonlyArray<Preset> = [
+  {
+    id: 'hotel',
+    label: 'Hotel',
+    hint: 'City and dates',
+    instruction: 'Find a hotel.',
+    output: z.strictObject({
+      hotelName: z.string().meta({ title: 'Hotel', description: 'Name' }),
+      notes: z.array(z.string()).meta({ title: 'Notes', description: 'Caveats' }),
+    }),
+  },
+];
 
-/** Service + fake adapter + a temporary SQLite file. */
+/** Deadline of a test run: executionTimeout (300 s) plus the watcher's margin. */
+export const DEADLINE_MS = 300_000 + 60_000;
+
+export type Harness = ReturnType<typeof createHarness>;
+
+/** Service + fake adapter + in-memory SQLite + a hand-cranked watcher clock. */
 export function createHarness(
   options: {
     startingBalance?: number;
     reservePerRun?: number;
     deviceIds?: Array<string>;
     withDeps?: boolean;
+    wrapLedger?: (ledger: Ledger) => Ledger;
   } = {},
-): Harness {
-  const directory = mkdtempSync(join(tmpdir(), 'branded-assistant-'));
-  const ledger = createLedger(join(directory, 'ledger.sqlite'), options.startingBalance ?? 100);
+) {
+  const db = new Database(':memory:');
+  const realLedger = createLedger(db, options.startingBalance ?? 100);
+  const ledger = options.wrapLedger ? options.wrapLedger(realLedger) : realLedger;
   const fake = createFakeDeps();
+  const clock = { now: Date.now() };
+  const scheduled: Array<() => Promise<void>> = [];
   const service = createAssistantService({
     ledger,
     deps: options.withDeps === false ? null : fake.deps,
     assistant: testAssistant,
+    presets: testPresets,
     deviceIds: options.deviceIds ?? [DEVICE_A],
     reservePerRun: options.reservePerRun ?? 20,
-    pollIntervalMs: 0,
+    pollIntervalMs: 1_000,
+    schedule: (callback) => {
+      scheduled.push(callback);
+    },
+    now: () => clock.now,
   });
   return {
+    db,
     ledger,
     fake,
+    clock,
     service,
-    cleanup() {
-      service.stop();
-      ledger.close();
-      rmSync(directory, { recursive: true, force: true });
+    /** Runs every scheduled watcher poll once. */
+    async tick() {
+      for (const callback of scheduled.splice(0)) await callback();
+    },
+    accountCount(): number {
+      return db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM accounts').get()?.n ?? 0;
     },
   };
 }

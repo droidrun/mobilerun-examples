@@ -74,7 +74,7 @@ export const assistantApi = {
 
   cancel(runId: string, signal?: AbortSignal): Promise<RunView> {
     return request(`${runPath(runId)}/cancel`, runViewSchema, {
-      method: 'POST',
+      ...json({}),
       signal,
     });
   },

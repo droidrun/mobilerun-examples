@@ -1,4 +1,4 @@
-/** An error with a stable code and HTTP status that is safe to show to end users. */
+/** A domain error with a stable code and HTTP status that is safe to show to end users. */
 export class ApiProblem extends Error {
   readonly status: number;
   readonly code: string;
@@ -11,37 +11,21 @@ export class ApiProblem extends Error {
   }
 }
 
-/** An error returned by the Mobilerun API, kept free of SDK types. */
-export class UpstreamError extends Error {
-  readonly status: number | undefined;
-
-  constructor(status: number | undefined, message: string) {
-    super(message);
-    this.name = 'UpstreamError';
-    this.status = status;
-  }
+/** The HTTP status of an SDK error (or anything shaped like one), if it has one. */
+export function statusOf(error: unknown): number | undefined {
+  return typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof error.status === 'number'
+    ? error.status
+    : undefined;
 }
 
 /**
- * Render an upstream API error as returned (4xx / 422, e.g. an unavailable
- * device or insufficient balance). Credential problems on the server's own key
- * and upstream outages are not the end user's to fix, so they become a 502.
+ * The API definitely did not accept the request: a 4xx other than a request
+ * timeout. Timeouts, 5xx and network failures are ambiguous: the task may exist.
  */
-export function problemFromUpstream(error: UpstreamError): ApiProblem {
-  const status = error.status;
-  if (status !== undefined && status >= 400 && status < 500) {
-    if (status === 401 || status === 403) {
-      return new ApiProblem(
-        502,
-        'upstream_unauthorized',
-        'The assistant backend rejected the server credentials.',
-      );
-    }
-    return new ApiProblem(status, 'upstream_error', error.message);
-  }
-  return new ApiProblem(
-    502,
-    'upstream_unavailable',
-    'The assistant backend is unavailable. Try again shortly.',
-  );
+export function isDefiniteRejection(error: unknown): boolean {
+  const status = statusOf(error);
+  return status !== undefined && status >= 400 && status < 500 && status !== 408;
 }

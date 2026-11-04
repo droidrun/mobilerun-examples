@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { csrf } from 'hono/csrf';
+import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import {
   sendMessageRequestSchema,
@@ -7,7 +9,7 @@ import {
   startRunRequestSchema,
 } from '@/shared/contracts';
 import type { AssistantService } from './assistant-service';
-import { ApiProblem } from './errors';
+import { ApiProblem, statusOf } from './errors';
 import { stubSession, type SessionEnv } from './session';
 
 type AppOptions = {
@@ -20,11 +22,8 @@ const runIdSchema = z.uuid();
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-function problem(error: ApiProblem): Response {
-  return Response.json(
-    { error: error.code, message: error.message },
-    { status: error.status, headers: NO_STORE },
-  );
+function errorResponse(status: number, code: string, message: string): Response {
+  return Response.json({ error: code, message }, { status, headers: NO_STORE });
 }
 
 async function readJson(request: Request): Promise<unknown> {
@@ -42,6 +41,8 @@ export function createApiApp({
     context.json({ ok: true, sdkConfigured: service.sdkConfigured }, 200, NO_STORE),
   );
 
+  // Rejects cross-origin form-style POSTs. The session cookie is also SameSite=Lax.
+  app.use('/api/*', csrf());
   app.use('/api/*', stubSession(sessionSecret, production));
 
   const runId = (value: string): string => {
@@ -71,23 +72,30 @@ export function createApiApp({
       );
     }
     const run = await service.start(context.get('userId'), parsed.data);
-    return context.json(runViewSchema.parse(run), 201, NO_STORE);
+    // 202: the start could not be confirmed and is being reconciled.
+    return context.json(
+      runViewSchema.parse(run),
+      run.status === 'unknown' ? 202 : 201,
+      NO_STORE,
+    );
   });
 
-  app.get('/api/runs/:runId', async (context) => {
-    const run = await service.get(
-      context.get('userId'),
-      runId(context.req.param('runId')),
-    );
-    return context.json(runViewSchema.parse(run), 200, NO_STORE);
-  });
+  app.get('/api/runs/:runId', (context) =>
+    context.json(
+      runViewSchema.parse(
+        service.get(context.get('userId'), runId(context.req.param('runId'))),
+      ),
+      200,
+      NO_STORE,
+    ),
+  );
 
   app.post('/api/runs/:runId/messages', async (context) => {
     const parsed = sendMessageRequestSchema.safeParse(
       await readJson(context.req.raw),
     );
     if (!parsed.success) {
-      throw new ApiProblem(400, 'invalid_request', 'Write a short message.');
+      throw new ApiProblem(400, 'invalid_request', 'Write a short note.');
     }
     const run = await service.sendMessage(
       context.get('userId'),
@@ -106,11 +114,19 @@ export function createApiApp({
   });
 
   app.onError((error) => {
-    if (error instanceof ApiProblem) return problem(error);
+    if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof ApiProblem) {
+      return errorResponse(error.status, error.code, error.message);
+    }
+    // API errors (4xx/422, such as an unavailable device) are rendered as
+    // returned. Map them to your own copy for a white-label product.
+    const status = statusOf(error);
+    if (status !== undefined && status >= 400 && status < 600) {
+      console.error('upstream request failed', status, error);
+      return errorResponse(status, 'upstream_error', error.message);
+    }
     console.error('unhandled API error', error);
-    return problem(
-      new ApiProblem(500, 'internal_error', 'Unexpected server error.'),
-    );
+    return errorResponse(500, 'internal_error', 'Unexpected server error.');
   });
 
   return app;

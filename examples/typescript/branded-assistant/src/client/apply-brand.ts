@@ -2,7 +2,7 @@ import { brand } from '@/shared/brand';
 import { readableOn } from '@/shared/color';
 
 /**
- * Map brand.json onto the CSS variables the stream components and the page read.
+ * Map brand.json onto the CSS variables the page and @mobilerun/react read.
  * Everything else (card, muted, border) is derived in styles.css.
  */
 export function applyBrand(document: Document): void {

@@ -1,106 +1,55 @@
 import { randomUUID } from 'node:crypto';
 import {
   isTerminalStatus,
-  type RunStatus,
   type RunView,
   type SessionView,
   type StartRunRequest,
-  type TimelineEntry,
 } from '@/shared/contracts';
+import type { AssistantDeps } from './assistant-deps';
 import {
-  outputSchemaFor,
+  messageFor,
   publicPersona,
-  publicPresets,
   systemPromptFor,
   taskFor,
   type AssistantConfig,
 } from './assistant-config';
-import { ApiProblem, UpstreamError, problemFromUpstream } from './errors';
-import type { Ledger, RunRow } from './ledger';
+import { ApiProblem, isDefiniteRejection, statusOf } from './errors';
+import type { Ledger, RunRecord } from './ledger';
+import { outputSchemaFor, publicPresets, type Preset } from './presets';
 import {
-  describeAgentEvent,
-  looksLikeQuestion,
-  mapStatus,
-  type UpstreamStatus,
-} from './progress';
-
-export type StartTaskInput = {
-  deviceId: string;
-  task: string;
-  systemPrompt: string;
-  outputSchema: Record<string, unknown>;
-  maxSteps: number;
-  executionTimeout: number;
-  llmModel?: string;
-};
-
-export type TaskStatusRecord = {
-  status: UpstreamStatus;
-  succeeded?: boolean | null;
-  steps?: number | null;
-  message?: string | null;
-  lastResponse?: Record<string, unknown> | null;
-};
-
-export type TaskResultRecord = {
-  status: UpstreamStatus;
-  succeeded?: boolean | null;
-  steps?: number | null;
-  message?: string | null;
-  output?: Record<string, unknown> | null;
-  creditsUsed?: number | null;
-};
-
-export type StreamCredentials = { streamUrl: string; streamToken: string };
-
-/** Everything the service needs from Mobilerun; the adapter is the only SDK user. */
-export interface AssistantDeps {
-  startTask: (input: StartTaskInput) => Promise<{ taskId: string }>;
-  getStatus: (taskId: string) => Promise<TaskStatusRecord>;
-  retrieveTask: (taskId: string) => Promise<TaskResultRecord>;
-  sendMessage: (taskId: string, message: string) => Promise<void>;
-  stopTask: (taskId: string) => Promise<void>;
-  getStream: (deviceId: string) => Promise<StreamCredentials | undefined>;
-}
+  createRunWatcher,
+  note,
+  type LiveRun,
+  type Schedule,
+} from './run-watcher';
 
 export type AssistantServiceOptions = {
   ledger: Ledger;
   /** null when no API key is configured: the UI loads, runs cannot start. */
   deps: AssistantDeps | null;
   assistant: AssistantConfig;
+  presets: ReadonlyArray<Preset>;
   deviceIds: ReadonlyArray<string>;
   reservePerRun: number;
-  /** Background settlement poll; 0 disables it (tests drive `get` instead). */
   pollIntervalMs: number;
+  /** Test seams for the watcher. */
+  schedule?: Schedule;
+  now?: () => number;
 };
 
 export type AssistantService = {
+  readonly sdkConfigured: boolean;
   session: (userId: string) => SessionView;
   start: (userId: string, input: StartRunRequest) => Promise<RunView>;
-  get: (userId: string, runId: string) => Promise<RunView>;
-  list: (userId: string) => Array<RunView>;
-  sendMessage: (
-    userId: string,
-    runId: string,
-    message: string,
-  ) => Promise<RunView>;
+  get: (userId: string, runId: string) => RunView;
+  sendMessage: (userId: string, runId: string, message: string) => Promise<RunView>;
   cancel: (userId: string, runId: string) => Promise<RunView>;
-  /** Re-attach watchers and device locks for runs left open by a restart. */
+  /** Re-attach watchers and phone locks for runs left open by a restart (single process). */
   resume: () => void;
-  stop: () => void;
-  readonly sdkConfigured: boolean;
 };
 
-type LiveRun = {
-  timeline: Array<TimelineEntry>;
-  lastAgentText: string | null;
-  lastSteps: number;
-  question: string | null;
-  stream?: StreamCredentials;
-};
-
-const MAX_TIMELINE = 60;
 const RECENT_RUNS = 20;
+const RAW_OUTPUT_LIMIT = 4_000;
 
 export function createAssistantService(
   options: AssistantServiceOptions,
@@ -108,180 +57,72 @@ export function createAssistantService(
   const { ledger, deps, assistant, deviceIds, reservePerRun } = options;
   const busyDevices = new Set<string>();
   const live = new Map<string, LiveRun>();
-  const syncing = new Map<string, Promise<void>>();
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  let stopped = false;
+  const watcher = deps
+    ? createRunWatcher({
+        ledger,
+        deps,
+        busyDevices,
+        live,
+        executionTimeoutSeconds: assistant.executionTimeout,
+        pollIntervalMs: options.pollIntervalMs,
+        schedule: options.schedule,
+        now: options.now,
+      })
+    : null;
 
   const requireDeps = (): AssistantDeps => {
     if (!deps) {
       throw new ApiProblem(
         503,
         'missing_api_key',
-        'The assistant is not connected yet. Set MOBILERUN_API_KEY on the server.',
+        'The assistant is not connected yet. Set MOBILERUN_CLOUD_API_KEY on the server.',
       );
     }
     return deps;
   };
 
-  /** Run an upstream call, rendering API errors as returned. */
-  const upstream = async <T>(call: () => Promise<T>): Promise<T> => {
-    try {
-      return await call();
-    } catch (error) {
-      if (error instanceof UpstreamError) {
-        console.error('upstream call failed', error.status, error.message);
-        throw problemFromUpstream(error);
-      }
-      throw error;
-    }
-  };
-
-  const liveFor = (runId: string): LiveRun => {
-    let entry = live.get(runId);
-    if (!entry) {
-      entry = { timeline: [], lastAgentText: null, lastSteps: 0, question: null };
-      live.set(runId, entry);
-    }
-    return entry;
-  };
-
-  const note = (
-    runId: string,
-    kind: TimelineEntry['kind'],
-    text: string,
-  ): void => {
-    const entry = liveFor(runId);
-    entry.timeline.push({ at: new Date().toISOString(), kind, text });
-    if (entry.timeline.length > MAX_TIMELINE) entry.timeline.shift();
-  };
-
-  const view = (row: RunRow): RunView => {
-    const entry = live.get(row.id);
-    const status = row.status;
-    const terminal = isTerminalStatus(status);
+  const view = (run: RunRecord): RunView => {
+    const entry = live.get(run.id);
+    const preset = options.presets.find((item) => item.id === run.presetId);
+    const parsed =
+      run.output !== null && preset ? preset.output.safeParse(run.output) : null;
     return {
-      id: row.id,
-      presetId: row.preset_id,
-      request: row.request,
-      status,
-      steps: row.steps,
+      id: run.id,
+      presetId: run.presetId,
+      request: run.request,
+      status: run.status,
+      steps: run.steps,
       timeline: entry?.timeline ?? [],
-      question: !terminal ? (entry?.question ?? null) : null,
-      result: row.output
-        ? (JSON.parse(row.output) as Record<string, unknown>)
-        : null,
-      message: row.message,
-      reserved: row.reserved,
-      charged: row.settled,
-      balance: ledger.balance(row.user_id),
-      createdAt: row.created_at,
-      ...(!terminal && entry?.stream ? entry.stream : {}),
+      result: parsed?.success ? parsed.data : null,
+      rawOutput:
+        run.output !== null && !parsed?.success
+          ? JSON.stringify(run.output, null, 2).slice(0, RAW_OUTPUT_LIMIT)
+          : null,
+      message: run.message,
+      error:
+        entry?.error ??
+        (run.status === 'unknown'
+          ? "We couldn't confirm that your request started. We're checking."
+          : null),
+      charged: run.charged,
+      balance: ledger.balance(run.userId),
     };
   };
 
-  const finish = (row: RunRow): void => {
-    busyDevices.delete(row.device_id);
-    const entry = live.get(row.id);
-    if (entry) delete entry.stream;
-    const timer = timers.get(row.id);
-    if (timer) clearTimeout(timer);
-    timers.delete(row.id);
+  const owned = (userId: string, runId: string): RunRecord => {
+    const run = ledger.getRun(userId, runId);
+    if (!run) throw new ApiProblem(404, 'run_not_found', 'Run not found.');
+    return run;
   };
 
-  const sync = async (runId: string): Promise<void> => {
-    const row = ledger.getRunById(runId);
-    if (!row || row.settled !== null || !row.task_id || !deps) return;
-    const taskId = row.task_id;
-    const entry = liveFor(runId);
-
-    const state = await deps.getStatus(taskId);
-    const status = mapStatus(state.status, state.succeeded);
-    const text = describeAgentEvent(state.lastResponse);
-    const steps = state.steps ?? row.steps ?? 0;
-
-    if (text && text !== entry.lastAgentText) {
-      note(runId, 'agent', text);
-      entry.lastAgentText = text;
-    } else if (!text && steps > entry.lastSteps) {
-      note(runId, 'status', `Step ${steps}`);
+  /** The task may exist but we cannot tell: keep the reservation and the phone. */
+  const markUnknown = (runId: string): void => {
+    try {
+      ledger.updateProgress(runId, { status: 'unknown' });
+    } catch (error) {
+      console.error('could not mark run unknown', runId, error);
     }
-    entry.lastSteps = Math.max(entry.lastSteps, steps);
-    entry.question = status === 'running' && looksLikeQuestion(text) ? text : null;
-
-    if (!isTerminalStatus(status)) {
-      ledger.updateProgress(runId, { status, steps });
-      if (!entry.stream) {
-        entry.stream = await deps.getStream(row.device_id).catch(() => undefined);
-      }
-      return;
-    }
-
-    const result = await deps.retrieveTask(taskId);
-    const settled = ledger.settle(runId, {
-      status,
-      creditsUsed: result.creditsUsed ?? (status === 'completed' ? row.reserved : 0),
-      output: result.output ?? null,
-      message: result.message ?? state.message ?? null,
-      steps: result.steps ?? steps,
-    });
-    note(
-      runId,
-      'status',
-      status === 'completed'
-        ? 'Finished'
-        : status === 'cancelled'
-          ? 'Cancelled'
-          : 'Stopped before finishing',
-    );
-    if (settled || ledger.getRunById(runId)?.settled !== null) finish(row);
   };
-
-  const syncOnce = (runId: string): Promise<void> => {
-    const running = syncing.get(runId);
-    if (running) return running;
-    const next = sync(runId).finally(() => syncing.delete(runId));
-    syncing.set(runId, next);
-    return next;
-  };
-
-  const watch = (runId: string): void => {
-    if (options.pollIntervalMs <= 0 || stopped) return;
-    const timer = setTimeout(async () => {
-      timers.delete(runId);
-      try {
-        await syncOnce(runId);
-      } catch (error) {
-        console.error('background sync failed', error);
-      }
-      const row = ledger.getRunById(runId);
-      if (row && row.settled === null && !stopped) watch(runId);
-    }, options.pollIntervalMs);
-    timer.unref?.();
-    timers.set(runId, timer);
-  };
-
-  const owned = (userId: string, runId: string): RunRow => {
-    const row = ledger.getRun(userId, runId);
-    if (!row) throw new ApiProblem(404, 'run_not_found', 'Run not found.');
-    return row;
-  };
-
-  const refreshed = async (userId: string, runId: string): Promise<RunView> => {
-    const row = owned(userId, runId);
-    if (row.settled === null) {
-      await syncOnce(runId).catch((error: unknown) => {
-        // Keep serving the last known state; the next poll retries.
-        console.error('sync failed', error);
-      });
-    }
-    return view(owned(userId, runId));
-  };
-
-  const list = (userId: string): Array<RunView> =>
-    ledger
-      .listRuns(userId, RECENT_RUNS)
-      .reverse()
-      .map((row) => view(row));
 
   return {
     sdkConfigured: deps !== null,
@@ -289,18 +130,21 @@ export function createAssistantService(
     session(userId) {
       return {
         persona: publicPersona(assistant),
-        presets: publicPresets(assistant),
+        presets: publicPresets(options.presets),
         balance: ledger.balance(userId),
         reservePerRun,
         sdkConfigured: deps !== null,
         deviceCount: deviceIds.length,
-        runs: list(userId),
+        runs: ledger
+          .listRuns(userId, RECENT_RUNS)
+          .reverse()
+          .map((run) => view(run)),
       };
     },
 
     async start(userId, input) {
       const api = requireDeps();
-      const preset = assistant.presets.find((item) => item.id === input.presetId);
+      const preset = options.presets.find((item) => item.id === input.presetId);
       if (!preset) {
         throw new ApiProblem(400, 'unknown_preset', 'Choose one of the listed requests.');
       }
@@ -314,10 +158,12 @@ export function createAssistantService(
         throw new ApiProblem(409, 'device_busy', 'Every phone is busy right now. Try again in a minute.');
       }
       busyDevices.add(deviceId);
+      const release = () => busyDevices.delete(deviceId);
 
       const runId = randomUUID();
+      let outcome;
       try {
-        const reservation = ledger.reserve({
+        outcome = ledger.reserve({
           userId,
           runId,
           deviceId,
@@ -325,95 +171,107 @@ export function createAssistantService(
           request: input.message,
           amount: reservePerRun,
         });
-        if (!reservation.ok) {
-          throw new ApiProblem(
-            402,
-            'insufficient_credits',
-            `Not enough credits: a request reserves ${reservePerRun}, you have ${reservation.balance}.`,
-          );
-        }
-
-        try {
-          const { taskId } = await upstream(() =>
-            api.startTask({
-              deviceId,
-              task: taskFor(preset, input.message),
-              systemPrompt: systemPromptFor(assistant),
-              outputSchema: outputSchemaFor(preset),
-              maxSteps: assistant.maxSteps,
-              executionTimeout: assistant.executionTimeout,
-              ...(assistant.llmModel ? { llmModel: assistant.llmModel } : {}),
-            }),
-          );
-          ledger.attachTask(runId, taskId);
-        } catch (error) {
-          // The task never existed: give the whole reservation back.
-          ledger.settle(runId, { status: 'failed', creditsUsed: 0 });
-          throw error;
-        }
       } catch (error) {
-        busyDevices.delete(deviceId);
+        release();
         throw error;
       }
+      if (outcome !== 'ok') {
+        release();
+        throw outcome === 'run_active'
+          ? new ApiProblem(409, 'run_active', 'You already have a request in progress. Wait for it to finish or stop it.')
+          : new ApiProblem(
+              402,
+              'insufficient_credits',
+              `Not enough credits: a request reserves ${reservePerRun}, you have ${ledger.balance(userId)}.`,
+            );
+      }
 
-      note(runId, 'status', 'Started');
-      const entry = liveFor(runId);
-      entry.stream = await api.getStream(deviceId).catch(() => undefined);
-      watch(runId);
+      let taskId: string;
+      try {
+        ({ taskId } = await api.startTask({
+          deviceId,
+          task: taskFor(preset.instruction, input.message),
+          systemPrompt: systemPromptFor(assistant),
+          outputSchema: outputSchemaFor(preset),
+          maxSteps: assistant.maxSteps,
+          executionTimeout: assistant.executionTimeout,
+          ...(assistant.llmModel ? { llmModel: assistant.llmModel } : {}),
+        }));
+      } catch (error) {
+        if (isDefiniteRejection(error)) {
+          // The API said no: the task does not exist, so refund everything.
+          try {
+            ledger.settle(runId, { status: 'failed', creditsUsed: 0 });
+          } finally {
+            release();
+          }
+          throw error;
+        }
+        // Timeout, 5xx or network failure: the task may exist. Keep the
+        // reservation and the phone; the watcher settles it at the deadline.
+        console.warn(`start of run ${runId} is unconfirmed`, error);
+        markUnknown(runId);
+        watcher?.watch(runId);
+        return view(owned(userId, runId));
+      }
+
+      try {
+        ledger.attachTask(runId, taskId);
+      } catch (error) {
+        // The task exists but the database write failed. Keep everything and
+        // let the watcher record the task id and reconcile.
+        console.error('could not record the task id', runId, error);
+        markUnknown(runId);
+        watcher?.watch(runId, taskId);
+        return view(owned(userId, runId));
+      }
+
+      note(live, runId, 'status', 'Started');
+      watcher?.watch(runId);
       return view(owned(userId, runId));
     },
 
-    get: refreshed,
-
-    list,
+    // The watcher is the only thing that talks to the API for progress; this
+    // reads what it recorded.
+    get: (userId, runId) => view(owned(userId, runId)),
 
     async sendMessage(userId, runId, message) {
       const api = requireDeps();
-      const row = owned(userId, runId);
-      if (isTerminalStatus(row.status)) {
+      const run = owned(userId, runId);
+      if (isTerminalStatus(run.status)) {
         throw new ApiProblem(409, 'run_finished', 'This request has already finished.');
       }
-      if (!row.task_id) {
+      if (!run.taskId) {
         throw new ApiProblem(409, 'run_starting', 'The request is still starting.');
       }
-      const taskId = row.task_id;
-      await upstream(() => api.sendMessage(taskId, message));
-      note(runId, 'user', message);
-      liveFor(runId).question = null;
+      const sent = await api.sendMessage(run.taskId, messageFor(message));
+      if (!sent) {
+        throw new ApiProblem(409, 'message_not_sent', "Your note couldn't be delivered. Try again in a moment.");
+      }
+      note(live, run.id, 'user', message);
       return view(owned(userId, runId));
     },
 
     async cancel(userId, runId) {
       const api = requireDeps();
-      const row = owned(userId, runId);
-      if (isTerminalStatus(row.status) || !row.task_id) return view(row);
-      const taskId = row.task_id;
+      const run = owned(userId, runId);
+      if (isTerminalStatus(run.status) || !run.taskId) return view(run);
       try {
-        await upstream(() => api.stopTask(taskId));
+        await api.stopTask(run.taskId);
       } catch (error) {
-        // 409: the task already reached a terminal state; settle it below.
-        if (!(error instanceof ApiProblem && error.status === 409)) throw error;
+        // 409: the task already reached a terminal state; the watcher settles it.
+        if (statusOf(error) !== 409) throw error;
       }
       ledger.updateProgress(runId, { status: 'cancelling' });
-      return refreshed(userId, runId);
+      return view(owned(userId, runId));
     },
 
     resume() {
-      for (const row of ledger.openRuns()) {
-        if (row.task_id) {
-          busyDevices.add(row.device_id);
-          watch(row.id);
-        } else {
-          // The process died between reserving and creating a task.
-          ledger.settle(row.id, { status: 'failed', creditsUsed: 0 });
-        }
+      for (const run of ledger.openRuns()) {
+        busyDevices.add(run.deviceId);
+        if (!run.taskId) markUnknown(run.id);
+        watcher?.watch(run.id);
       }
-    },
-
-    stop() {
-      stopped = true;
-      for (const timer of timers.values()) clearTimeout(timer);
-      timers.clear();
     },
   };
 }

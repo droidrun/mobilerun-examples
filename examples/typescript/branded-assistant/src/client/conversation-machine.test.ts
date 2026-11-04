@@ -14,13 +14,12 @@ function run(overrides: Partial<RunView> = {}): RunView {
     status: 'running',
     steps: null,
     timeline: [],
-    question: null,
     result: null,
+    rawOutput: null,
     message: null,
-    reserved: 20,
+    error: null,
     charged: null,
     balance: 80,
-    createdAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
 }
@@ -38,7 +37,7 @@ const session: SessionView = {
 describe('conversation machine', () => {
   test('loads the session with its history and balance', () => {
     const state = conversationReducer(createInitialState(), { type: 'session-loaded', session });
-    expect(state).toMatchObject({ phase: 'ready', balance: 100 });
+    expect(state).toMatchObject({ phase: 'ready', balance: 100, persona: { displayName: 'Pip' } });
     expect(activeRun(state)).toBeNull();
   });
 
@@ -56,6 +55,30 @@ describe('conversation machine', () => {
     expect(state.runs).toHaveLength(2);
     expect(activeRun(state)).toBeNull();
     expect(state.balance).toBe(96);
+  });
+
+  test('an unconfirmed run counts as active', () => {
+    const state = conversationReducer(createInitialState(), {
+      type: 'session-loaded',
+      session: { ...session, runs: [run({ status: 'unknown' })] },
+    });
+    expect(activeRun(state)?.status).toBe('unknown');
+  });
+
+  test('after a failed start, a refreshed session adopts the run that did start', () => {
+    let state = conversationReducer(createInitialState(), { type: 'session-loaded', session });
+    state = conversationReducer(state, { type: 'error', message: 'timed out' });
+
+    const adopted = conversationReducer(state, {
+      type: 'session-refreshed',
+      session: { ...session, runs: [...session.runs, run({ id: 'run-2' })] },
+    });
+    expect(activeRun(adopted)?.id).toBe('run-2');
+    expect(adopted.error).toBeNull();
+
+    const nothing = conversationReducer(state, { type: 'session-refreshed', session });
+    expect(activeRun(nothing)).toBeNull();
+    expect(nothing.error).toBe('timed out');
   });
 
   test('keeps errors separate from run state', () => {

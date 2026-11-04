@@ -1,32 +1,68 @@
 import {
   isTerminalStatus,
+  type Persona,
+  type PublicPreset,
   type RunView,
   type SessionView,
 } from '@/shared/contracts';
 
 export type ConversationState = {
   phase: 'loading' | 'ready' | 'failed';
-  session: SessionView | null;
-  /** Oldest first; the last one may still be running. */
+  persona: Persona | null;
+  presets: Array<PublicPreset>;
+  reservePerRun: number | null;
+  sdkConfigured: boolean;
+  deviceCount: number;
+  /** The one balance the UI shows. */
+  balance: number | null;
+  /** Oldest first. A user has at most one active run, and it is the last. */
   runs: Array<RunView>;
-  balance: number;
   error: string | null;
 };
 
 export type ConversationAction =
   | { type: 'session-loaded'; session: SessionView }
+  /** Re-read after a failed start: adopt a run the server did start. */
+  | { type: 'session-refreshed'; session: SessionView }
   | { type: 'session-failed'; message: string }
   | { type: 'run-updated'; run: RunView }
   | { type: 'error'; message: string }
   | { type: 'error-dismissed' };
 
 export function createInitialState(): ConversationState {
-  return { phase: 'loading', session: null, runs: [], balance: 0, error: null };
+  return {
+    phase: 'loading',
+    persona: null,
+    presets: [],
+    reservePerRun: null,
+    sdkConfigured: true,
+    deviceCount: 0,
+    balance: null,
+    runs: [],
+    error: null,
+  };
 }
 
 export function activeRun(state: ConversationState): RunView | null {
   const last = state.runs.at(-1);
   return last && !isTerminalStatus(last.status) ? last : null;
+}
+
+function fromSession(
+  state: ConversationState,
+  session: SessionView,
+): ConversationState {
+  return {
+    ...state,
+    phase: 'ready',
+    persona: session.persona,
+    presets: session.presets,
+    reservePerRun: session.reservePerRun,
+    sdkConfigured: session.sdkConfigured,
+    deviceCount: session.deviceCount,
+    balance: session.balance,
+    runs: session.runs,
+  };
 }
 
 export function conversationReducer(
@@ -35,13 +71,12 @@ export function conversationReducer(
 ): ConversationState {
   switch (action.type) {
     case 'session-loaded':
-      return {
-        phase: 'ready',
-        session: action.session,
-        runs: action.session.runs,
-        balance: action.session.balance,
-        error: null,
-      };
+      return { ...fromSession(state, action.session), error: null };
+    case 'session-refreshed': {
+      const next = fromSession(state, action.session);
+      // Found a run we did not know about: the start worked after all.
+      return { ...next, error: activeRun(next) ? null : state.error };
+    }
     case 'session-failed':
       return { ...state, phase: 'failed', error: action.message };
     case 'run-updated': {

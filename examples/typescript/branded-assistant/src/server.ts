@@ -4,11 +4,12 @@ import { assistantConfig } from './server/assistant-config';
 import { createAssistantService } from './server/assistant-service';
 import { createApiApp } from './server/api-app';
 import { readServerConfig } from './server/config';
-import { createLedger } from './server/ledger';
+import { createLedger, openDatabase } from './server/ledger';
 import { createMobilerunAssistantDeps } from './server/mobilerun-adapter';
+import { presets } from './server/presets';
 
 const config = readServerConfig(process.env);
-const ledger = createLedger(config.databasePath, config.startingBudget);
+const ledger = createLedger(openDatabase(config.databasePath), config.startingBudget);
 const service = createAssistantService({
   ledger,
   deps: config.apiKey
@@ -20,6 +21,7 @@ const service = createAssistantService({
       )
     : null,
   assistant: assistantConfig,
+  presets,
   deviceIds: config.deviceIds,
   reservePerRun: config.reservePerRun,
   pollIntervalMs: 3_000,
@@ -34,7 +36,7 @@ const app = createApiApp({
 
 if (!config.apiKey) {
   console.warn(
-    'MOBILERUN_API_KEY is not set. The UI will load, but requests cannot start.',
+    'MOBILERUN_CLOUD_API_KEY is not set. The UI will load, but requests cannot start.',
   );
 }
 if (config.deviceIds.length === 0) {

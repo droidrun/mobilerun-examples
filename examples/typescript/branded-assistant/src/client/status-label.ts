@@ -6,6 +6,8 @@ export function statusLabel(status: RunStatus): string {
       return 'Getting started';
     case 'running':
       return 'Working on it';
+    case 'unknown':
+      return 'Checking';
     case 'cancelling':
       return 'Stopping';
     case 'completed':

@@ -3,28 +3,26 @@ import { isTerminalStatus, type PublicPreset, type RunView } from '@/shared/cont
 import { statusLabel } from '../status-label';
 import { ProgressTimeline } from './progress-timeline';
 import { ResultCard } from './result-card';
-import { WatchPanel } from './watch-panel';
 
 type RunMessageProps = {
   run: RunView;
   preset: PublicPreset | undefined;
   isActive: boolean;
-  reply: (message: string) => Promise<void>;
+  reply: (message: string) => Promise<boolean>;
   cancel: () => Promise<void>;
 };
 
-function ReplyForm({ run, reply }: Pick<RunMessageProps, 'run' | 'reply'>) {
+function ReplyForm({ reply }: Pick<RunMessageProps, 'reply'>) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const asking = run.question !== null;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const message = text.trim();
     if (!message || sending) return;
     setSending(true);
-    await reply(message);
-    setText('');
+    // Keep the text when the note was not delivered, so nothing is lost.
+    if (await reply(message)) setText('');
     setSending(false);
   };
 
@@ -33,19 +31,18 @@ function ReplyForm({ run, reply }: Pick<RunMessageProps, 'run' | 'reply'>) {
       <input
         value={text}
         onChange={(event) => setText(event.target.value)}
-        placeholder={asking ? 'Your answer' : 'Add a note for the assistant'}
+        placeholder="Send a note to your assistant"
         maxLength={1_000}
-        aria-label={asking ? 'Answer the question' : 'Message the assistant'}
+        aria-label="Send a note to your assistant"
       />
       <button type="submit" disabled={sending || !text.trim()}>
-        {asking ? 'Answer' : 'Send'}
+        Send
       </button>
     </form>
   );
 }
 
 export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageProps) {
-  const terminal = isTerminalStatus(run.status);
   return (
     <>
       <div className="bubble bubble-user">
@@ -59,26 +56,33 @@ export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageP
           {run.charged !== null ? <span className="muted">{run.charged} credits used</span> : null}
         </div>
 
-        {!terminal || run.status !== 'completed' ? <ProgressTimeline entries={run.timeline} /> : null}
+        {run.error ? <p className="muted" role="status">{run.error}</p> : null}
 
-        {run.question ? <p className="question">{run.question}</p> : null}
+        {run.status !== 'completed' ? <ProgressTimeline entries={run.timeline} /> : null}
 
-        {run.status === 'completed' && run.result ? (
-          <ResultCard preset={preset} result={run.result} />
+        {run.status === 'completed' ? (
+          <ResultCard preset={preset} result={run.result} rawOutput={run.rawOutput} />
         ) : null}
 
         {run.status === 'failed' || run.status === 'cancelled' ? (
           <p className="muted">{run.message ?? 'Nothing was booked or changed.'}</p>
         ) : null}
 
-        {isActive ? (
+        {isActive && !isTerminalStatus(run.status) ? (
           <>
-            <ReplyForm run={run} reply={reply} />
+            {run.status !== 'unknown' ? <ReplyForm reply={reply} /> : null}
             <div className="run-actions">
-              <WatchPanel streamUrl={run.streamUrl} streamToken={run.streamToken} />
-              <button type="button" className="link danger" disabled={run.status === 'cancelling'} onClick={() => void cancel()}>
-                Stop
-              </button>
+              <span />
+              {run.status !== 'unknown' ? (
+                <button
+                  type="button"
+                  className="link danger"
+                  disabled={run.status === 'cancelling'}
+                  onClick={() => void cancel()}
+                >
+                  Stop
+                </button>
+              ) : null}
             </div>
           </>
         ) : null}

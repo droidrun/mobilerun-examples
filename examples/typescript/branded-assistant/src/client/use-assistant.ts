@@ -29,68 +29,92 @@ export function useAssistant() {
     undefined,
     createInitialState,
   );
-  const controller = useRef(new AbortController());
+  // Aborts everything in flight when the component unmounts.
+  const lifetime = useRef<AbortController | null>(null);
   const active = activeRun(state);
   const activeId = active?.id ?? null;
 
+  const signal = useCallback((): AbortSignal => {
+    lifetime.current ??= new AbortController();
+    return requestSignal(lifetime.current.signal);
+  }, []);
+
   const loadSession = useCallback(() => {
     assistantApi
-      .session(requestSignal(controller.current.signal))
+      .session(signal())
       .then((session) => dispatch({ type: 'session-loaded', session }))
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
           dispatch({ type: 'session-failed', message: errorMessage(error) });
         }
       });
-  }, []);
+  }, [signal]);
 
   useEffect(() => {
-    const current = new AbortController();
-    controller.current = current;
+    lifetime.current = new AbortController();
     loadSession();
-    return () => current.abort();
+    return () => {
+      lifetime.current?.abort();
+      lifetime.current = null;
+    };
   }, [loadSession]);
 
-  const guarded = useCallback(
-    async <T,>(call: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> => {
+  /** Runs a call; true when it succeeded. Errors become the visible error. */
+  const attempt = useCallback(
+    async (call: () => Promise<void>): Promise<boolean> => {
       try {
-        return await call(requestSignal(controller.current.signal));
+        await call();
+        return true;
       } catch (error) {
         if (!isAbortError(error)) {
           dispatch({ type: 'error', message: errorMessage(error) });
         }
-        return undefined;
+        return false;
       }
     },
     [],
   );
 
   const start = useCallback(
-    async (input: StartRunRequest) => {
-      const run = await guarded((signal) => assistantApi.start(input, signal));
-      if (run) dispatch({ type: 'run-updated', run });
+    async (input: StartRunRequest): Promise<boolean> => {
+      const ok = await attempt(async () => {
+        const run = await assistantApi.start(input, signal());
+        dispatch({ type: 'run-updated', run });
+      });
+      if (!ok) {
+        // A timed-out start may still have started a run. Look before the
+        // user is offered a second start.
+        await assistantApi
+          .session(signal())
+          .then((session) => dispatch({ type: 'session-refreshed', session }))
+          .catch(() => undefined);
+      }
+      return ok;
     },
-    [guarded],
+    [attempt, signal],
   );
 
   const reply = useCallback(
-    async (message: string) => {
-      if (!activeId) return;
-      const run = await guarded((signal) =>
-        assistantApi.sendMessage(activeId, message, signal),
-      );
-      if (run) dispatch({ type: 'run-updated', run });
-    },
-    [activeId, guarded],
+    (message: string): Promise<boolean> =>
+      activeId
+        ? attempt(async () => {
+            const run = await assistantApi.sendMessage(activeId, message, signal());
+            dispatch({ type: 'run-updated', run });
+          })
+        : Promise.resolve(false),
+    [activeId, attempt, signal],
   );
 
   const cancel = useCallback(async () => {
     if (!activeId) return;
-    const run = await guarded((signal) => assistantApi.cancel(activeId, signal));
-    if (run) dispatch({ type: 'run-updated', run });
-  }, [activeId, guarded]);
+    await attempt(async () => {
+      const run = await assistantApi.cancel(activeId, signal());
+      dispatch({ type: 'run-updated', run });
+    });
+  }, [activeId, attempt, signal]);
 
-  // Serial polling of the active run: one request at a time, backing off on errors.
+  // Serial polling of the active run: one request at a time, backing off on
+  // errors. The server answers from what its own watcher recorded.
   useEffect(() => {
     if (!activeId) return;
     const polling = new AbortController();

@@ -2,7 +2,10 @@ import type { PublicPreset } from '@/shared/contracts';
 
 type ResultCardProps = {
   preset: PublicPreset | undefined;
-  result: Record<string, unknown>;
+  /** Output that matched the preset's schema. */
+  result: Record<string, unknown> | null;
+  /** Output that did not match, as text. Shown collapsed. */
+  rawOutput: string | null;
 };
 
 function Value({ type, value }: { type: PublicPreset['fields'][number]['type']; value: unknown }) {
@@ -19,18 +22,29 @@ function Value({ type, value }: { type: PublicPreset['fields'][number]['type']; 
       </dd>
     );
   }
-  const text = value === null || value === undefined || value === '' ? '—' : String(value);
-  return <dd>{text}</dd>;
+  return <dd>{typeof value === 'string' || typeof value === 'number' ? String(value) : '—'}</dd>;
 }
 
-/** Renders the structured output with the labels the preset declares. */
-export function ResultCard({ preset, result }: ResultCardProps) {
-  const fields = preset?.fields ?? [];
+/** Renders validated structured output, or says it could not be read. */
+export function ResultCard({ preset, result, rawOutput }: ResultCardProps) {
+  if (!result) {
+    return (
+      <section className="result-card" aria-label="Result">
+        <p className="muted">The result could not be read.</p>
+        {rawOutput ? (
+          <details>
+            <summary>Show what came back</summary>
+            <pre>{rawOutput}</pre>
+          </details>
+        ) : null}
+      </section>
+    );
+  }
   return (
     <section className="result-card" aria-label="Result">
       <h3>{preset?.label ?? 'Result'}</h3>
       <dl>
-        {fields.map((field) => (
+        {(preset?.fields ?? []).map((field) => (
           <div key={field.key} className="result-row">
             <dt>{field.label}</dt>
             <Value type={field.type} value={result[field.key]} />

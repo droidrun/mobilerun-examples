@@ -33,7 +33,7 @@ describe('server config', () => {
       STARTING_BUDGET: '50',
       RESERVE_PER_RUN: '10',
       DATABASE_PATH: '/tmp/ledger.sqlite',
-      MOBILERUN_API_KEY: 'dr_sk_test',
+      MOBILERUN_CLOUD_API_KEY: 'dr_sk_test',
     });
     expect(config).toMatchObject({
       sessionSecret: SECRET,
@@ -45,8 +45,16 @@ describe('server config', () => {
     });
   });
 
+  test('treats an empty SESSION_SECRET like an unset one', () => {
+    const config = readServerConfig({ SESSION_SECRET: '' });
+    expect(config.ephemeralSessionSecret).toBe(true);
+    expect(config.sessionSecret.length).toBeGreaterThanOrEqual(32);
+    expect(readServerConfig({ SESSION_SECRET: '' }).sessionSecret).not.toBe(config.sessionSecret);
+  });
+
   test('requires a stable session secret in production', () => {
     expect(() => readServerConfig({ NODE_ENV: 'production' })).toThrow();
+    expect(() => readServerConfig({ NODE_ENV: 'production', SESSION_SECRET: '' })).toThrow();
     expect(readServerConfig({ NODE_ENV: 'production', SESSION_SECRET: SECRET }).production).toBe(true);
   });
 

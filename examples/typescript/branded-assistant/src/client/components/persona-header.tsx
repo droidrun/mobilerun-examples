@@ -1,12 +1,11 @@
 import { brand } from '@/shared/brand';
-import type { Persona } from '@/shared/contracts';
+import type { ConversationState } from '../conversation-machine';
 import { logoDataUri } from '../apply-brand';
 
-type PersonaHeaderProps = {
-  persona: Persona | null;
-  balance: number | null;
-  reservePerRun: number | null;
-};
+type PersonaHeaderProps = Pick<
+  ConversationState,
+  'persona' | 'balance' | 'reservePerRun'
+>;
 
 export function PersonaHeader({ persona, balance, reservePerRun }: PersonaHeaderProps) {
   return (
@@ -17,7 +16,10 @@ export function PersonaHeader({ persona, balance, reservePerRun }: PersonaHeader
         <p>{persona?.tagline ?? ''}</p>
       </div>
       {balance !== null ? (
-        <div className="credits" title={reservePerRun ? `Each request holds ${reservePerRun} credits until it finishes.` : undefined}>
+        <div
+          className="credits"
+          title={reservePerRun ? `Each request holds ${reservePerRun} credits until it finishes.` : undefined}
+        >
           <strong>{balance}</strong>
           <span>credits</span>
         </div>
