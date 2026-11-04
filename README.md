@@ -91,6 +91,7 @@ After installing [uv](https://docs.astral.sh/uv/) and
 
 | Skill | Use it for |
 | --- | --- |
+| [`mobilerun-branded-assistant`](skills/mobilerun-branded-assistant/) | White-label assistants: tasks with a persona and output schema, progress, notes, and a per-user credit ledger |
 | [`mobilerun-task-runner`](skills/mobilerun-task-runner/) | TypeScript task runners using the server-side SDK and a live React device stream |
 | [`mobilerun-webhooks`](skills/mobilerun-webhooks/) | Python receivers for signed webhooks, replay protection, and secure file downloads |
 
@@ -104,8 +105,10 @@ examples/
 ├── python/
 │   └── webhook-file-receiver/
 └── typescript/
+    ├── branded-assistant/
     └── task-runner/
 skills/
+├── mobilerun-branded-assistant/
 ├── mobilerun-task-runner/
 └── mobilerun-webhooks/
 ```
