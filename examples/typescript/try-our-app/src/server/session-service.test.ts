@@ -49,8 +49,8 @@ describe('session lifecycle', () => {
     expect(devices.calls).toEqual([
       'createDevice:demo-00000000-0000-4000-8000-000000000001',
       'waitReady:device-1',
-      'enableKiosk:device-1:com.example.demo',
       'startApp:device-1:com.example.demo',
+      'enableKiosk:device-1:com.example.demo',
     ]);
     expect(session.expiresInSeconds).toBe(TTL_MS / 1_000);
     expect(store.get(session.id)?.state).toBe('live');
@@ -141,7 +141,8 @@ describe('terminate failures keep the obligation', () => {
 
     expect(devices.terminated()).toEqual(['device-1']);
     expect(store.countOpen()).toBe(0);
-    expect(devices.calls.some((call) => call.startsWith('startApp'))).toBe(false);
+    // The app was already running when the lock failed; the device is still cleaned up.
+    expect(devices.calls.some((call) => call.startsWith('startApp'))).toBe(true);
   });
 });
 

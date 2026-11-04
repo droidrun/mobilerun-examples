@@ -181,7 +181,7 @@ describe('limits', () => {
     expect(busy.body.error).toBe('capacity_reached');
   });
 
-  test('renders API errors as returned', async () => {
+  test('passes the API status through without its text', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => {});
     const { app, devices, store } = setup();
     devices.failNext(
@@ -197,9 +197,25 @@ describe('limits', () => {
     expect(result.response.status).toBe(422);
     expect(result.body).toMatchObject({
       error: 'demo_unavailable',
-      message: 'Device type android_cloud_phone is unavailable.',
+      message: 'Something went wrong. Please try again.',
     });
+    expect(JSON.stringify(result.body)).not.toContain('android_cloud_phone');
     expect(store.countOpen()).toBe(0);
+    consoleError.mockRestore();
+  });
+
+  test('always answers with JSON, even when something unexpected is thrown', async () => {
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {});
+    const { app, devices } = setup();
+    devices.createDevice = async () => {
+      throw 'not even an Error';
+    };
+
+    const result = await startSession(app);
+
+    expect(result.response.status).toBe(502);
+    expect(result.response.headers.get('Content-Type')).toContain('application/json');
+    expect(result.body.error).toBe('demo_unavailable');
     consoleError.mockRestore();
   });
 });

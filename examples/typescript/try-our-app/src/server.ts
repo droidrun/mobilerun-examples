@@ -53,6 +53,11 @@ if (!service) {
 const server = Bun.serve({
   hostname: config.host,
   port: config.port,
+  // POST /api/sessions answers only once the phone is ready, which can take
+  // longer than Bun's default 10 s idle timeout; that would drop the
+  // connection and the browser would see "Failed to fetch" instead of JSON.
+  // 255 s is Bun's maximum and covers the 120 s boot timeout.
+  idleTimeout: 255,
   routes: {
     '/': index,
   },

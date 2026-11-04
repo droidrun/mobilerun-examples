@@ -166,9 +166,12 @@ export function createSessionService({
         signal: abort.signal,
       });
       assertStarting(id);
-      await deps.enableKiosk(deviceId, appPackage);
-      assertStarting(id);
+      // The app starts first: Android lock-task (kiosk) mode pins an app that
+      // already has a running task, and enabling it for a package with no task
+      // fails with "no task found".
       await deps.startApp(deviceId, appPackage);
+      assertStarting(id);
+      await deps.enableKiosk(deviceId, appPackage);
       assertStarting(id);
       store.update(id, { state: 'live', expiresAt: now() + ttlMs });
     } catch (error) {

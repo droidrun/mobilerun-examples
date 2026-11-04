@@ -40,20 +40,6 @@ function upstreamStatus(error: unknown): number {
   return 502;
 }
 
-/** The API's own explanation, when it sent one. Rendered as returned. */
-function upstreamMessage(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('error' in error)) {
-    return undefined;
-  }
-  const body = error.error;
-  if (typeof body !== 'object' || body === null) return undefined;
-  for (const key of ['detail', 'message', 'title']) {
-    const value = (body as Record<string, unknown>)[key];
-    if (typeof value === 'string' && value.length > 0) return value;
-  }
-  return undefined;
-}
-
 function remoteAddress(context: Context): string {
   try {
     return getConnInfo(context).remote.address ?? 'unknown';
@@ -127,6 +113,19 @@ export function createApiApp({
     await next();
   });
 
+  // Hono hands only `Error` instances to onError and rethrows anything else,
+  // which drops the connection. Wrap whatever else gets thrown so every
+  // failure still reaches onError and the browser gets JSON.
+  app.use('*', async (_context, next) => {
+    try {
+      await next();
+    } catch (error) {
+      throw error instanceof Error
+        ? error
+        : new Error(`Non-Error thrown: ${String(error)}`, { cause: error });
+    }
+  });
+
   app.use('/api/*', async (context, next) => {
     await next();
     context.header('Cache-Control', 'no-store');
@@ -181,8 +180,9 @@ export function createApiApp({
     },
   );
 
-  // Every failure leaves through here. The API's own status and message are
-  // passed through; this server adds no gates of its own.
+  // Every failure leaves through here, so the browser always gets JSON. The
+  // API's own status is passed through (this server adds no gates of its own);
+  // its text is logged, not shown to visitors.
   app.onError((error, context) => {
     if (error instanceof DemoError) {
       return context.json(
@@ -195,7 +195,7 @@ export function createApiApp({
     return context.json(
       {
         error: 'demo_unavailable',
-        message: upstreamMessage(error) ?? 'The demo is unavailable right now.',
+        message: 'Something went wrong. Please try again.',
       },
       upstreamStatus(error) as ContentfulStatusCode,
       { 'Cache-Control': 'no-store' },
