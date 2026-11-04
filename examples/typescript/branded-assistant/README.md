@@ -126,8 +126,15 @@ browser ──same-origin /api/*, session cookie──▶ Bun + Hono ──@mobi
 6. **Result.** The output is validated against the preset's zod schema. If it
    does not match, the page says the result could not be read and offers the
    raw JSON collapsed. It is never rendered as a card.
+   A task that ends `failed` but carries the assistant's own words (for
+   example it declined an off-topic request) is shown as "Couldn't finish",
+   with those words as the assistant's reply rather than as an error. The
+   status is not remapped.
 7. **Ownership.** Every run route filters by the session's user id. Someone
    else's run id answers `404`, exactly like an unknown id.
+
+The progress timeline is kept in memory: after a server restart a run is still
+reconciled and settled, but its timeline is empty.
 
 Phones are exclusive: one active run per phone, tracked in process. When every
 phone is busy the API answers `409 device_busy` instead of queueing. After a

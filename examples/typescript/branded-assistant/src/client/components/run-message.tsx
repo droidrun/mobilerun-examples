@@ -42,6 +42,28 @@ function ReplyForm({ reply }: Pick<RunMessageProps, 'reply'>) {
   );
 }
 
+/**
+ * A failed task may still carry the assistant's own words (for example it
+ * declined an off-topic request). Show those as its reply, not as an error.
+ */
+function Declined({ run, preset }: Pick<RunMessageProps, 'run' | 'preset'>) {
+  const replies = [run.message, run.rawOutput].filter((text): text is string => Boolean(text));
+  return (
+    <>
+      <p className="muted">The assistant couldn't do this one.</p>
+      {run.result ? <ResultCard preset={preset} result={run.result} rawOutput={null} /> : null}
+      {replies.map((text) => (
+        <blockquote key={text} className="assistant-reply">
+          {text}
+        </blockquote>
+      ))}
+      {replies.length === 0 && !run.result ? (
+        <p className="muted">Nothing was booked or changed.</p>
+      ) : null}
+    </>
+  );
+}
+
 export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageProps) {
   return (
     <>
@@ -64,7 +86,9 @@ export function RunMessage({ run, preset, isActive, reply, cancel }: RunMessageP
           <ResultCard preset={preset} result={run.result} rawOutput={run.rawOutput} />
         ) : null}
 
-        {run.status === 'failed' || run.status === 'cancelled' ? (
+        {run.status === 'failed' ? <Declined run={run} preset={preset} /> : null}
+
+        {run.status === 'cancelled' ? (
           <p className="muted">{run.message ?? 'Nothing was booked or changed.'}</p>
         ) : null}
 
