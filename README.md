@@ -92,6 +92,7 @@ After installing [uv](https://docs.astral.sh/uv/) and
 | Skill | Use it for |
 | --- | --- |
 | [`mobilerun-task-runner`](skills/mobilerun-task-runner/) | TypeScript task runners using the server-side SDK and a live React device stream |
+| [`mobilerun-tenant-portal`](skills/mobilerun-tenant-portal/) | White-label portals where each end user owns one cloud phone, with server-enforced ownership |
 | [`mobilerun-webhooks`](skills/mobilerun-webhooks/) | Python receivers for signed webhooks, replay protection, and secure file downloads |
 
 Each skill points to its runnable example as the source of truth and keeps live
@@ -104,9 +105,11 @@ examples/
 ├── python/
 │   └── webhook-file-receiver/
 └── typescript/
-    └── task-runner/
+    ├── task-runner/
+    └── tenant-portal/
 skills/
 ├── mobilerun-task-runner/
+├── mobilerun-tenant-portal/
 └── mobilerun-webhooks/
 ```
 
