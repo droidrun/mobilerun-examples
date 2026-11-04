@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobilerun Try Our App"
+  short_description: "Build a branded live app demo"
+  default_prompt: "Use $mobilerun-try-our-app to adapt the try-our-app example into a branded live demo with a kiosk-locked cloud phone."
