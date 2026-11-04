@@ -2,27 +2,21 @@ import type { Context } from 'hono';
 import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie';
 
 const COOKIE = 'portal_session';
-const MAX_AGE = 60 * 60 * 24 * 7; // seconds
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // seconds
 
-/**
- * The session cookie: a signed user id and nothing else. The stub is the `POST /api/login`
- * route in api-app.ts, where any email signs in. When you wire your identity provider, delete
- * that route and replace this module together with it; the rest only needs a user id.
- */
-export function createSessions(secret: string, secure: boolean) {
+// STUB: the session behind the stub login in api-app.ts. Replace both with your login.
+/** The session cookie: a signed user id and nothing else. */
+export function createSessions(sessionSecret: string, secureCookies: boolean) {
+  const cookieOptions = {
+    httpOnly: true, sameSite: 'Lax', secure: secureCookies, path: '/', maxAge: COOKIE_MAX_AGE,
+  } as const;
   return {
-    start: (context: Context, userId: number) =>
-      setSignedCookie(context, COOKIE, String(userId), secret, {
-        httpOnly: true,
-        sameSite: 'Lax',
-        secure,
-        path: '/',
-        maxAge: MAX_AGE,
-      }),
-    end: (context: Context) => void deleteCookie(context, COOKIE, { path: '/', secure }),
+    start: (c: Context, userId: number) =>
+      setSignedCookie(c, COOKIE, String(userId), sessionSecret, cookieOptions),
+    end: (c: Context) => void deleteCookie(c, COOKIE, cookieOptions),
     /** The user id, or null for a missing, unsigned or tampered cookie. */
-    async userId(context: Context) {
-      const value = await getSignedCookie(context, secret, COOKIE);
+    async userId(c: Context) {
+      const value = await getSignedCookie(c, sessionSecret, COOKIE);
       return value && /^[1-9]\d{0,15}$/.test(value) ? Number(value) : null;
     },
   };

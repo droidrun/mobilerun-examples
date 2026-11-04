@@ -10,7 +10,7 @@ const schema = z.object({
 });
 
 /** Reads the environment. An empty `FOO=` line, as in .env.example, counts as unset. */
-export function readConfig(env: Record<string, string | undefined>) {
+export function readServerConfig(env: Record<string, string | undefined>) {
   const config = schema.parse(Object.fromEntries(Object.entries(env).filter(([, v]) => v?.trim())));
   const production = env.NODE_ENV === 'production';
   const secret = config.SESSION_SECRET;
@@ -23,10 +23,10 @@ export function readConfig(env: Record<string, string | undefined>) {
     apiKey: config.MOBILERUN_CLOUD_API_KEY,
     baseURL: apiUrl && !apiUrl.endsWith('/v1') ? `${apiUrl}/v1` : apiUrl,
     port: config.PORT,
-    databasePath: config.DATABASE_PATH,
     production,
     // Outside production an unset secret is random per process: sessions reset on restart.
     sessionSecret: secret ?? randomBytes(32).toString('hex'),
     sessionSecretGenerated: !secret,
+    databasePath: config.DATABASE_PATH,
   };
 }

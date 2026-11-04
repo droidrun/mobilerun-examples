@@ -1,42 +1,37 @@
 import { useState } from 'react';
 import { brand } from './client/brand';
-import { AppShell } from './client/components/app-shell';
-import { PhoneFrame, type Tone } from './client/components/phone-frame';
+import { AppShell, Notice, type Tone } from './client/components/app-shell';
+import { PhoneFrame } from './client/components/phone-frame';
 import { usePortal, type Portal } from './client/use-portal';
 import type { DeviceAction, DeviceView } from './shared/contracts';
 
 const { product } = brand;
-type Look = [status: string, tone: Tone, line: string];
 
-/** The device state as the user sees it: pill text, tone, and the line on the empty screen. */
-const STATES: Record<string, Look> = {
-  creating: ['Setting up', 'busy', 'Setting up your phone…'],
-  assigned: ['Starting', 'busy', 'Starting your phone…'],
-  ready: ['Online', 'live', 'Connecting…'],
-  rebooting: ['Restarting', 'busy', 'Restarting…'],
-  resetting: ['Resetting', 'busy', 'Resetting…'],
-  migrating: ['Moving', 'busy', 'Moving your phone…'],
-  maintenance: ['Maintenance', 'neutral', 'Your phone is under maintenance.'],
-  stopped: ['Stopped', 'neutral', 'Your phone is stopped.'],
-};
-const lookOf = (state: string): Look =>
-  STATES[state] ?? ['Unavailable', 'danger', 'Your phone is unavailable.'];
+/** The phone frame per screen: its pill, the pill's tone, and the line on the empty screen. */
+const PHONE = {
+  loading: { pill: 'Loading', tone: 'busy', line: 'One moment…' },
+  signedOut: { pill: 'Signed out', tone: 'neutral', line: 'Your phone opens here after sign-in.' },
+  none: { pill: 'No phone', tone: 'neutral', line: 'You do not have a phone yet.' },
+  deleted: { pill: 'Deleted', tone: 'neutral', line: 'This phone was deleted.' },
+  // The device states, in this product's own words.
+  creating: { pill: 'Setting up', tone: 'busy', line: 'Setting up your phone…' },
+  assigned: { pill: 'Starting', tone: 'busy', line: 'Starting your phone…' },
+  ready: { pill: 'Online', tone: 'live', line: 'Connecting…' },
+  rebooting: { pill: 'Restarting', tone: 'busy', line: 'Restarting…' },
+  resetting: { pill: 'Resetting', tone: 'busy', line: 'Resetting…' },
+  migrating: { pill: 'Moving', tone: 'busy', line: 'Moving your phone…' },
+  maintenance: { pill: 'Maintenance', tone: 'neutral', line: 'Your phone is under maintenance.' },
+  stopped: { pill: 'Stopped', tone: 'neutral', line: 'Your phone is stopped.' },
+  unavailable: { pill: 'Unavailable', tone: 'danger', line: 'Your phone is unavailable.' },
+} satisfies Record<string, { pill: string; tone: Tone; line: string }>;
+type Screen = keyof typeof PHONE;
 
-/** Still checking the session, or signed in and the device not loaded yet. */
-const loading = ({ email, device }: Portal) =>
-  email === undefined || (email !== null && device === undefined);
-
-/** What the phone frame shows while there is no stream. Its pill is about the screen. */
-function frame(portal: Portal): Look {
-  const { email, device, deleted } = portal;
-  if (loading(portal)) return ['Loading', 'busy', 'One moment…'];
-  if (!email) return ['Signed out', 'neutral', 'Your phone opens here after you sign in.'];
-  if (device) {
-    const [, tone, line] = lookOf(device.state);
-    return tone === 'busy' || tone === 'live' ? ['Waiting', 'busy', line] : ['Off', tone, line];
-  }
-  if (deleted) return ['Deleted', 'neutral', 'This phone was deleted.'];
-  return ['No phone', 'neutral', 'You do not have a phone yet.'];
+/** Which row of PHONE the page shows. A device state this page does not know is unavailable. */
+function screenOf({ email, device, deleted }: Portal): Screen {
+  if (email === undefined || (email && device === undefined)) return 'loading';
+  if (!email) return 'signedOut';
+  if (!device) return deleted ? 'deleted' : 'none';
+  return Object.hasOwn(PHONE, device.state) ? (device.state as Screen) : 'unavailable';
 }
 
 function SignIn({ signIn, pending }: Portal) {
@@ -54,8 +49,8 @@ function SignIn({ signIn, pending }: Portal) {
       >
         <label className="field">
           Email
-          <input type="email" autoComplete="email" placeholder="you@example.com" required
-            value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input className="input" type="email" autoComplete="email" placeholder="you@example.com"
+            required value={email} onChange={(event) => setEmail(event.target.value)} />
         </label>
         <button className="btn btn-primary" disabled={!!pending}>
           {pending ? 'Signing in…' : 'Sign in'}
@@ -85,33 +80,34 @@ function GetPhone({ create, pending, deleted }: Portal) {
 }
 
 type Step = DeviceAction | 'delete';
-/** Button text, the text while its request runs, and the class. */
-const BUTTONS: Record<Step, [string, string, string?]> = {
-  stop: ['Stop', 'Stopping…'],
-  resume: ['Start', 'Starting…', 'btn-primary'],
-  reboot: ['Restart', 'Restarting…'],
-  reset: ['Reset', 'Resetting…'],
-  delete: ['Delete', 'Deleting…', 'btn-danger'],
+/** Each button: its text, its text while its request runs, and its classes. */
+const BUTTONS: Record<Step, { label: string; busy: string; className: string }> = {
+  stop: { label: 'Stop', busy: 'Stopping…', className: 'btn' },
+  resume: { label: 'Start', busy: 'Starting…', className: 'btn btn-primary' },
+  reboot: { label: 'Restart', busy: 'Restarting…', className: 'btn' },
+  reset: { label: 'Reset', busy: 'Resetting…', className: 'btn' },
+  delete: { label: 'Delete', busy: 'Deleting…', className: 'btn btn-danger' },
 };
-/** Steps that erase data ask in the page first: question and answer. */
-const CONFIRM = {
-  reset: ['Reset your phone? Its apps, accounts and files are erased.', 'Yes, reset'],
-  delete: ['Delete your phone? This cannot be undone.', 'Yes, delete'],
-} as const;
+/** Steps that erase data ask in the page first. */
+const CONFIRM: Partial<Record<Step, { question: string; answer: string }>> = {
+  reset: {
+    question: 'Reset your phone? Its apps, accounts and files are erased.',
+    answer: 'Yes, reset',
+  },
+  delete: { question: 'Delete your phone? This cannot be undone.', answer: 'Yes, delete' },
+};
 
 function PhonePanel({ device, pending, act, remove }: Portal & { device: DeviceView }) {
-  const [confirm, setConfirm] = useState<keyof typeof CONFIRM>();
-  const [status, tone] = lookOf(device.state);
+  const [confirm, setConfirm] = useState<Step>();
+  const question = confirm && CONFIRM[confirm];
   const settingUp = device.state === 'creating' || device.state === 'assigned';
   const stopped = device.state === 'stopped';
   const run = (step: Step) => (step === 'delete' ? remove() : act(step));
+  const steps: Array<Step> = [stopped ? 'resume' : 'stop', 'reboot', 'reset', 'delete'];
 
   return (
     <>
-      <div className="phone-head">
-        <h1>Your {product}</h1>
-        <span className="pill" data-tone={tone}>{status}</span>
-      </div>
+      <h1>Your {product}</h1>
       <p className="muted">
         {settingUp
           ? 'This takes a minute or two. Your phone opens here as soon as it is ready.'
@@ -121,34 +117,32 @@ function PhonePanel({ device, pending, act, remove }: Portal & { device: DeviceV
       </p>
       {settingUp && <div className="progress" role="progressbar" aria-label="Setting up" />}
       <p className="small">Created {new Date(device.createdAt).toLocaleDateString()}</p>
-      {confirm ? (
-        <div className="notice" data-tone="danger" role="alertdialog" aria-label="Confirm">
-          <div className="stack">
-            <p>{CONFIRM[confirm][0]}</p>
-            <div className="actions">
-              <button
-                className="btn btn-danger"
-                onClick={() => {
-                  setConfirm(undefined);
-                  void run(confirm);
-                }}
-              >
-                {CONFIRM[confirm][1]}
-              </button>
-              <button className="btn" onClick={() => setConfirm(undefined)}>Cancel</button>
-            </div>
+      {confirm && question ? (
+        <div className="stack" role="alertdialog" aria-label="Confirm">
+          <Notice text={question.question} />
+          <div className="actions">
+            <button
+              className="btn btn-danger"
+              onClick={() => {
+                setConfirm(undefined);
+                void run(confirm);
+              }}
+            >
+              {question.answer}
+            </button>
+            <button className="btn" onClick={() => setConfirm(undefined)}>Cancel</button>
           </div>
         </div>
       ) : (
         <div className="actions">
-          {([stopped ? 'resume' : 'stop', 'reboot', 'reset', 'delete'] as const).map((step) => (
+          {steps.map((step) => (
             <button
               key={step}
-              className={`btn ${BUTTONS[step][2] ?? ''}`}
+              className={BUTTONS[step].className}
               disabled={!!pending}
-              onClick={() => (step === 'reset' || step === 'delete' ? setConfirm(step) : run(step))}
+              onClick={() => (step in CONFIRM ? setConfirm(step) : run(step))}
             >
-              {BUTTONS[step][pending === step ? 1 : 0]}
+              {pending === step ? BUTTONS[step].busy : BUTTONS[step].label}
             </button>
           ))}
         </div>
@@ -158,38 +152,40 @@ function PhonePanel({ device, pending, act, remove }: Portal & { device: DeviceV
 }
 
 function Panel(portal: Portal) {
-  if (loading(portal)) return <div className="progress" role="progressbar" aria-label="Loading" />;
-  if (!portal.email) return <SignIn {...portal} />;
+  const screen = screenOf(portal);
+  if (screen === 'loading') {
+    return <div className="progress" role="progressbar" aria-label="Loading" />;
+  }
+  if (screen === 'signedOut') return <SignIn {...portal} />;
   const { device } = portal;
   return device ? <PhonePanel {...portal} device={device} /> : <GetPhone {...portal} />;
 }
 
 export function App() {
   const portal = usePortal();
-  const { email, stream, streamProblem, notice } = portal;
-  const [status, tone, line] = frame(portal);
+  const { email, stream, streamProblem, notice, pending } = portal;
+  const phone = PHONE[screenOf(portal)];
   const account = email && (
     <div className="account">
       <span className="small">{email}</span>
-      <button className="btn" onClick={portal.signOut} disabled={!!portal.pending}>
+      <button className="btn" onClick={portal.signOut} disabled={!!pending}>
         Sign out
       </button>
     </div>
   );
 
   return (
-    <AppShell product={product} right={account}>
+    <AppShell right={account}>
       <div className="split">
         <section className="stack" aria-live="polite">
           <Panel {...portal} />
-          {notice && <p className="notice" data-tone="danger" role="alert">{notice}</p>}
+          {notice && <Notice text={notice} />}
         </section>
         <PhoneFrame
-          stream={stream && { url: stream.streamUrl, token: stream.streamToken }}
-          label={streamProblem ?? line}
+          {...phone}
+          line={streamProblem ?? phone.line}
+          stream={stream}
           hasControl
-          status={stream ? 'Live' : status}
-          tone={stream ? 'live' : tone}
           onStreamHealed={portal.refreshStream}
         />
       </div>

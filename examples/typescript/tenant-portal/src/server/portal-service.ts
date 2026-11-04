@@ -1,16 +1,17 @@
 import type Mobilerun from '@mobilerun/sdk';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { DeviceAction, DeviceView, StreamView } from '@/shared/contracts';
 import type { PortalStore } from './store';
 
 /** A refusal of this server's own, with an HTTP status and text the end user may read. */
 export class PortalError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
+  constructor(readonly code: string, readonly status: ContentfulStatusCode, message: string) {
     super(message);
   }
 }
 
-const noDevice = () => new PortalError('no_device', 404, 'You do not have a phone.');
-const hasDevice = () => new PortalError('device_exists', 409, 'You already have a phone.');
+const NO_DEVICE = 'You do not have a phone.';
+const HAS_DEVICE = 'You already have a phone.';
 /** A 404 from the API means the device is already gone, which is fine here. */
 const unlessGone = (error: unknown) => {
   if ((error as { status?: unknown } | null)?.status !== 404) throw error;
@@ -30,13 +31,29 @@ export function createPortalService(client: Mobilerun, store: PortalStore) {
 
   const own = (userId: number) => {
     const deviceId = store.deviceId(userId);
-    if (!deviceId) throw noDevice();
+    if (!deviceId) throw new PortalError('no_device', 404, NO_DEVICE);
     return deviceId;
+  };
+
+  /** Links a new phone to its user. One that cannot be linked bills with no owner: release it. */
+  const linkOrRelease = async (userId: number, deviceId: string) => {
+    try {
+      if (store.link(userId, deviceId)) return;
+      throw new PortalError('device_exists', 409, HAS_DEVICE);
+    } catch (error) {
+      console.error('releasing device that could not be linked', deviceId, error);
+      await devices.terminate(deviceId).catch((cause: unknown) => {
+        console.error('device is still running and not linked to any user', deviceId, cause);
+      });
+      throw error;
+    }
   };
 
   return {
     async create(userId: number): Promise<DeviceView> {
-      if (creating.has(userId) || store.deviceId(userId)) throw hasDevice();
+      if (creating.has(userId) || store.deviceId(userId)) {
+        throw new PortalError('device_exists', 409, HAS_DEVICE);
+      }
       creating.add(userId);
       try {
         // No SDK retries: a retried create could provision, and bill, a second phone.
@@ -44,16 +61,7 @@ export function createPortalService(client: Mobilerun, store: PortalStore) {
           { deviceType: 'android_cloud_phone', name: `tenant-${userId}` },
           { maxRetries: 0 },
         );
-        try {
-          if (!store.link(userId, device.id)) throw hasDevice();
-        } catch (error) {
-          // The phone exists and bills, but has no owner: release it.
-          console.error('releasing device that could not be linked', device.id, error);
-          await devices.terminate(device.id).catch((cause: unknown) =>
-            console.error('device is still running and not linked to any user', device.id, cause),
-          );
-          throw error;
-        }
+        await linkOrRelease(userId, device.id);
         return view(device);
       } finally {
         creating.delete(userId);
@@ -65,7 +73,7 @@ export function createPortalService(client: Mobilerun, store: PortalStore) {
       const device = await devices.retrieve(deviceId).catch(unlessGone);
       if (!device || device.state === 'terminated') {
         store.unlink(userId, deviceId); // gone upstream: drop the stale link
-        throw noDevice();
+        throw new PortalError('no_device', 404, NO_DEVICE);
       }
       return view(device);
     },

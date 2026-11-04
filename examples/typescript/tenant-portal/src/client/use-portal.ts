@@ -3,55 +3,70 @@ import type { DeviceAction, DeviceView, ErrorBody, Me, StreamView } from '@/shar
 
 /** States that settle by themselves, so polling can pause. */
 const SETTLED = ['ready', 'stopped', 'maintenance'];
+/** Device polls: every 4 s, backing off to 30 s while they fail. */
+const POLL = { every: 4_000, max: 30_000 };
+/** Stream credentials: asked again from 1.5 s, backing off to 15 s, until the server has them. */
+const STREAM_RETRY = { every: 1_500, max: 15_000 };
 const SOMETHING_WRONG = 'Something went wrong. Please try again.';
 
-type Failure = Error & { status?: number };
-const is = (error: unknown, status: number) => (error as Failure | null)?.status === status;
-/** The server's own text, or the API's 4xx text it passed on. A network error stays plain. */
-const messageOf = (error: unknown) =>
-  (error as Failure | null)?.status ? (error as Failure).message : SOMETHING_WRONG;
+/** An answer of this server that is not 2xx: its error code, HTTP status and text. */
+export class ApiError extends Error {
+  constructor(readonly code: string, readonly status: number, message: string) {
+    super(message);
+  }
+}
 
-async function api<T>(method: string, path: string, body?: unknown, signal?: AbortSignal) {
+/** One call to this example's server. A lost connection rejects with the browser's own error. */
+async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const json = body === undefined ? {} : { headers: { 'Content-Type': 'application/json' } };
-  const response = await fetch(path, { method, signal, ...json, body: JSON.stringify(body) });
+  const response = await fetch(path, { method, ...json, body: JSON.stringify(body) });
   const data: unknown = await response.json().catch(() => null);
   if (response.ok) return data as T;
-  const message = (data as ErrorBody | null)?.message || SOMETHING_WRONG;
-  throw Object.assign(new Error(message), { status: response.status });
+  const { error = 'unknown', message } = (data ?? {}) as Partial<ErrorBody>;
+  throw new ApiError(error, response.status, message || SOMETHING_WRONG);
 }
+
+/** The server's own text, or the API's 4xx text it passed on. A lost connection stays plain. */
+const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : SOMETHING_WRONG);
+const hasStatus = (error: unknown, status: number) =>
+  error instanceof ApiError && error.status === status;
 
 /**
  * Runs `attempt` one call at a time, each scheduled only after the last one finished:
- * 'again' waits `base` ms, 'retry' doubles the wait (at least `base`, at most `max`).
+ * 'again' waits `every` ms, 'retry' doubles the wait (at most `max`), 'done' stops. The returned
+ * function cancels; an attempt still running then sees `cancelled()` and should drop its answer.
  */
 function serially(
-  [base, max]: [number, number],
-  attempt: (signal: AbortSignal) => Promise<'again' | 'retry' | 'done'>,
-  start = base,
+  { every, max }: { every: number; max: number },
+  attempt: (cancelled: () => boolean) => Promise<'again' | 'retry' | 'done'>,
+  firstIn = every,
 ) {
-  const controller = new AbortController();
-  let wait = start;
+  let cancelled = false;
+  let wait = firstIn;
   let timer = setTimeout(async function tick() {
-    const next = await attempt(controller.signal);
-    if (next === 'done' || controller.signal.aborted) return;
-    wait = next === 'again' ? base : Math.min(Math.max(base, wait * 2), max);
+    const next = await attempt(() => cancelled);
+    if (next === 'done' || cancelled) return;
+    wait = next === 'again' ? every : Math.min(Math.max(every, wait * 2), max);
     timer = setTimeout(tick, wait);
-  }, start);
+  }, firstIn);
   return () => {
-    controller.abort();
+    cancelled = true;
     clearTimeout(timer);
   };
 }
+
+/** What the phone screen shows: a stream, or why there is none. */
+type Screen = { stream: StreamView; problem?: never } | { problem: string; stream?: never };
 
 export function usePortal() {
   const [email, setEmail] = useState<string | null>(); // undefined: still checking
   const [device, setDevice] = useState<DeviceView | null>(); // undefined: not loaded yet
   const [deleted, setDeleted] = useState(false);
-  const [stream, setStream] = useState<StreamView>();
-  const [streamProblem, setStreamProblem] = useState<string>();
+  const [screen, setScreen] = useState<Screen>();
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
+  // Created once: `serial` must outlive renders, and the poll below depends on `actions`.
   const [actions] = useState(() => {
     let serial = 0; // a newer device request or a sign-out makes older answers stale
     const showDevice = (next: DeviceView | null | undefined) => {
@@ -64,22 +79,28 @@ export function usePortal() {
       showDevice(undefined);
     };
     // An ended session goes back to sign-in; anything else shows as a notice.
-    const fail = (error: unknown) => (is(error, 401) ? signedOut() : setNotice(messageOf(error)));
+    const fail = (error: unknown) => {
+      if (hasStatus(error, 401)) signedOut();
+      else setNotice(messageOf(error));
+    };
 
-    /** False only when the request failed; a 404 is an answer: no phone. */
-    const refresh = async (signal?: AbortSignal) => {
+    /** A 404 is an answer (no phone); 'failed' means the request itself failed. */
+    const refresh = async (): Promise<'ok' | 'failed'> => {
       const mine = ++serial;
       try {
-        const next = await api<DeviceView>('GET', '/api/device', undefined, signal);
+        const next = await api<DeviceView>('GET', '/api/device');
         if (mine === serial) setDevice(next);
-        return true;
+        return 'ok';
       } catch (error) {
-        if (signal?.aborted || mine !== serial) return true;
-        const none = is(error, 404);
+        if (mine !== serial) return 'ok';
+        if (hasStatus(error, 404)) {
+          setDevice(null);
+          return 'ok';
+        }
         // A failed first load still shows a screen, with the notice.
-        setDevice((now) => (none || now === undefined ? null : now));
-        if (!none) fail(error);
-        return none;
+        setDevice((now) => (now === undefined ? null : now));
+        fail(error);
+        return 'failed';
       }
     };
 
@@ -114,17 +135,20 @@ export function usePortal() {
           setDeleted(true);
         }),
       /** The stream is reconnecting: its credentials may have changed. */
-      refreshStream: () => api<StreamView>('GET', '/api/device/stream').then(setStream, () => {}),
+      refreshStream: () =>
+        api<StreamView>('GET', '/api/device/stream').then((stream) => setScreen({ stream }), () => {}),
     };
   });
 
   useEffect(() => {
-    const controller = new AbortController();
-    api<Me>('GET', '/api/me', undefined, controller.signal).then(
-      (me) => setEmail(me.email),
-      () => controller.signal.aborted || setEmail(null),
+    let cancelled = false;
+    api<Me>('GET', '/api/me').then(
+      (me) => cancelled || setEmail(me.email),
+      () => cancelled || setEmail(null),
     );
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load the phone, then poll while it moves between states. Polls run one at a time, the
@@ -133,31 +157,31 @@ export function usePortal() {
   const noDevice = device === null;
   useEffect(() => {
     if (!email || noDevice || (state && SETTLED.includes(state))) return;
-    return serially(
-      [4_000, 30_000],
-      async (signal) => ((await actions.refresh(signal)) ? 'again' : 'retry'),
-      state ? 4_000 : 0,
-    );
+    const poll = async () => ((await actions.refresh()) === 'ok' ? 'again' : 'retry');
+    return serially(POLL, poll, state ? POLL.every : 0);
   }, [email, noDevice, state, actions]);
 
   // The server decides whether the phone can stream. Ask on every state change and retry with
   // backoff until it hands out credentials; 409 means "not streaming (yet)".
   useEffect(() => {
-    setStreamProblem(undefined);
     if (!email || !state) {
-      setStream(undefined);
+      setScreen(undefined);
       return;
     }
+    setScreen((now) => (now?.stream ? now : undefined));
     return serially(
-      [1_500, 15_000],
-      async (signal) => {
+      STREAM_RETRY,
+      async (cancelled) => {
         try {
-          setStream(await api<StreamView>('GET', '/api/device/stream', undefined, signal));
-          setStreamProblem(undefined);
+          const stream = await api<StreamView>('GET', '/api/device/stream');
+          if (!cancelled()) setScreen({ stream });
           return 'done';
         } catch (error) {
-          if (is(error, 409)) setStream(undefined);
-          if (!signal.aborted) setStreamProblem(is(error, 409) ? undefined : messageOf(error));
+          if (cancelled()) return 'done';
+          // A working stream survives a failed refresh; a 409 means it is gone.
+          const problem = messageOf(error);
+          if (hasStatus(error, 409)) setScreen(undefined);
+          else setScreen((now) => (now?.stream ? now : { problem }));
           return 'retry';
         }
       },
@@ -165,7 +189,16 @@ export function usePortal() {
     );
   }, [email, state]);
 
-  return { email, device, deleted, stream, streamProblem, pending, notice, ...actions };
+  return {
+    email,
+    device,
+    deleted,
+    stream: screen?.stream,
+    streamProblem: screen?.problem,
+    pending,
+    notice,
+    ...actions,
+  };
 }
 
 export type Portal = ReturnType<typeof usePortal>;

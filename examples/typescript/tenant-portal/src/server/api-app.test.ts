@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type Mobilerun from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
-import { createPortalService } from './portal';
+import { createPortalService } from './portal-service';
 import { createPortalStore, type PortalStore } from './store';
 
 type Device = {
@@ -74,7 +74,7 @@ function setup(options: { store?: PortalStore; withKey?: boolean } = {}) {
   const client = { devices: sdk.devices } as unknown as Mobilerun;
   const service = options.withKey === false ? null : createPortalService(client, portalStore);
   const sessionSecret = 's'.repeat(40);
-  const app = createApiApp({ service, store: portalStore, sessionSecret, production: false });
+  const app = createApiApp({ service, store: portalStore, sessionSecret });
   // Same-origin browser writes carry an Origin header; the CSRF guard checks it.
   const call = (method: string, path: string, cookie?: string) =>
     app.request(path, {
@@ -192,7 +192,7 @@ describe('session', () => {
     const health = await (await call('GET', '/api/health')).json();
     expect(health).toEqual({ ok: true, sdkConfigured: false });
     const response = await call('GET', '/api/device', cookie);
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     expect((await response.json()).error).toBe('missing_api_key');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
@@ -222,7 +222,7 @@ describe('device lifecycle', () => {
     expect(sdk.live.size).toBe(1);
   });
 
-  test('passes API 4xx text through, but not a rejected portal key', async () => {
+  test('passes API 4xx text through, but not a rejected portal key or a 5xx', async () => {
     const { call, signIn } = setup();
     const cookie = await signIn('alice@example.com');
     sdk.createFailure = upstream(422, { message: 'Device type unavailable.' });
@@ -231,10 +231,12 @@ describe('device lifecycle', () => {
     const message = 'Device type unavailable.';
     expect(await rejected.json()).toEqual({ error: 'upstream_rejected', message });
 
-    sdk.createFailure = upstream(401, { message: 'bad key' });
-    const badKey = await call('POST', '/api/device', cookie);
-    expect(badKey.status).toBe(502);
-    expect((await badKey.json()).message).not.toContain('bad key');
+    for (const status of [401, 503]) {
+      sdk.createFailure = upstream(status, { message: 'bad key' });
+      const hidden = await call('POST', '/api/device', cookie);
+      expect(hidden.status).toBe(502);
+      expect((await hidden.json()).message).not.toContain('bad key');
+    }
     expect(store.deviceId(1)).toBeUndefined();
   });
 
@@ -303,7 +305,7 @@ describe('a device that cannot be linked is released', () => {
 
   test('a store that throws: terminated, id logged', async () => {
     const { call, signIn } = setup({ store: throwing() });
-    expect((await call('POST', '/api/device', await signIn('alice@example.com'))).status).toBe(502);
+    expect((await call('POST', '/api/device', await signIn('alice@example.com'))).status).toBe(500);
     expect(sdk.calls).toEqual(['terminate device-1']);
     expect(sdk.live.size).toBe(0);
     expect(logged('releasing')).toHaveLength(1);
@@ -312,7 +314,7 @@ describe('a device that cannot be linked is released', () => {
   test('a failed release logs the id once as still running', async () => {
     sdk.terminateFailure = new Error('terminate failed');
     const { call, signIn } = setup({ store: throwing() });
-    expect((await call('POST', '/api/device', await signIn('alice@example.com'))).status).toBe(502);
+    expect((await call('POST', '/api/device', await signIn('alice@example.com'))).status).toBe(500);
     expect(sdk.live.has('device-1')).toBe(true);
     expect(logged('still running')).toHaveLength(1);
   });

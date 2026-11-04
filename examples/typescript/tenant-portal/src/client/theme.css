@@ -1,4 +1,4 @@
-/* Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical. */
+/* Shared with the other white-label examples in this folder. */
 
 /* Tokens. Build only from these. --accent and --accent-ink come from brand.json (brand.ts). */
 :root {
@@ -30,7 +30,8 @@ body {
   font: 400 var(--t-2) / 1.5 var(--font);
   -webkit-font-smoothing: antialiased;
 }
-h1, h2, p, ul, dl, dd, figure { margin: 0; padding: 0; }
+h1, h2, p, ul, ol, dl, dd, figure, blockquote, pre, fieldset { margin: 0; padding: 0; }
+fieldset { border: 0; }
 h1, h2 { font-weight: 600; text-wrap: balance; }
 h1 { font-size: var(--t-5); line-height: 1.2; letter-spacing: -0.01em; }
 h2 { font-size: var(--t-3); line-height: 1.3; }
@@ -42,7 +43,8 @@ a { color: var(--accent-text); }
 .stack { display: flex; flex-direction: column; gap: var(--s-4); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--s-3); }
 
-/* Shell: 56px top bar, 1040px content, two columns from 900px. */
+/* Shell: 56px top bar, 1040px content, two columns from 900px: a text column of up to 420px
+   and a figure (the phone). `.split-fill` lets the second column take the rest instead. */
 .topbar { height: 56px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .topbar-inner, .content {
   width: min(1040px, 100%); margin-inline: auto; padding-inline: var(--s-4);
@@ -50,6 +52,9 @@ a { color: var(--accent-text); }
 .topbar-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
 .wordmark { display: flex; align-items: center; gap: var(--s-2); font: 600 var(--t-3) var(--font); }
 .brand-mark { flex: none; fill: var(--accent); }
+/* Context at the right end of the top bar, such as a countdown or a balance. */
+.topbar-meta { font-weight: 600; color: var(--ink-muted); white-space: nowrap; }
+.topbar-meta .num { color: var(--ink); }
 .content { padding-block: var(--s-8) var(--s-12); }
 .split { display: grid; gap: var(--s-8); }
 
@@ -61,6 +66,7 @@ a { color: var(--accent-text); }
     justify-content: space-between;
     align-items: center;
   }
+  .split-fill { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
 }
 @media (max-width: 899px) {
   h1 { font-size: var(--t-4); }
@@ -75,6 +81,16 @@ a { color: var(--accent-text); }
 .notice::before {
   content: ""; flex: none; width: 3px; border-radius: 2px; background: var(--tone);
 }
+
+/* Form field: a label above one input or textarea. */
+.field { display: grid; gap: var(--s-2); font-weight: 600; }
+.input {
+  width: 100%; padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font: inherit; font-weight: 400;
+}
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+textarea.input { resize: vertical; }
 
 /* Buttons */
 .btn {
@@ -118,30 +134,3 @@ a { color: var(--accent-text); }
 @media (prefers-reduced-motion: reduce) {
   .pill::before, .progress::after { animation: none; }
 }
-
-/* Phone frame: the only element with depth. The screen is dark in both themes,
-   and the variables @mobilerun/react reads are pinned to it here. */
-.phone-frame { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
-.phone {
-  --background: #0b0e0c; --foreground: #e7ece8; --card: #171c19; --border: #26302a;
-  --muted: #1d2420; --muted-foreground: #98a39c;
-  --primary: var(--accent); --primary-foreground: var(--accent-ink); --ring: var(--accent);
-  width: 300px;
-  max-width: 100%;
-  padding: 10px;
-  border-radius: 36px;
-  background: #050706;
-  box-shadow: 0 0 0 1px var(--line), 0 24px 48px -16px rgb(0 0 0 / 0.45);
-}
-.phone-screen {
-  position: relative; aspect-ratio: 9 / 19.5; overflow: hidden;
-  border-radius: 26px 26px 0 0; background: var(--background);
-}
-.phone-empty {
-  position: absolute; inset: 0;
-  display: grid; place-content: center; justify-items: center; gap: var(--s-3);
-  padding: var(--s-6); background: var(--background);
-  color: var(--muted-foreground); font-size: var(--t-1); text-align: center;
-}
-.phone-nav { border-radius: 0 0 26px 26px; color: var(--foreground); transition: opacity 160ms; }
-.phone-nav.is-off { opacity: 0.35; pointer-events: none; }

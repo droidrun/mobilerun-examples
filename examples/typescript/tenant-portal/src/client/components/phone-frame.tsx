@@ -1,51 +1,51 @@
-// Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical.
+// Shared with the other white-label examples in this folder.
 import { DeviceStream, NavigationBar } from '@mobilerun/react';
 import { useRef, useState, type ComponentRef } from 'react';
-import { BrandMark } from './app-shell';
-
-export type Tone = 'neutral' | 'busy' | 'live' | 'danger';
+import { BrandMark, type Tone } from './app-shell';
+import '@mobilerun/react/styles.css';
+import './phone-frame.css';
 
 type PhoneFrameProps = {
-  /** Stream credentials from your server. Without them the screen shows `label`. */
-  stream?: { url: string; token?: string };
+  /** Stream credentials from your server. Without them the screen shows `line`. */
+  stream?: { streamUrl: string; streamToken?: string };
+  /** Text and tone of the pill above the frame. */
+  pill: string;
+  tone: Tone;
   /** One line on the empty screen. */
-  label: string;
-  /** Whether the visitor may touch the phone right now. */
+  line: string;
+  /** Whether the user may touch the phone right now. */
   hasControl: boolean;
-  /** Text of the pill above the frame. */
-  status: string;
-  tone?: Tone;
   /** The stream is reconnecting: fetch fresh credentials if you can. */
   onStreamHealed?: () => void;
 };
 
 export function PhoneFrame(props: PhoneFrameProps) {
-  const { stream, label, hasControl, status, tone = 'neutral', onStreamHealed } = props;
+  const { stream, pill, tone, line, hasControl, onStreamHealed } = props;
   const streamRef = useRef<ComponentRef<typeof DeviceStream>>(null);
   const [connected, setConnected] = useState(false);
-  // The empty screen covers the stream until its first picture, so the visitor
+  // The empty screen covers the stream until its first picture, so the user
   // sees one designed state instead of the player's own placeholder.
   const [shownUrl, setShownUrl] = useState<string>();
-  const onScreen = stream !== undefined && shownUrl === stream.url;
+  const onScreen = stream !== undefined && shownUrl === stream.streamUrl;
   const canNavigate = onScreen && connected && hasControl;
 
   return (
     <figure className="phone-frame">
       <figcaption className="pill" data-tone={tone}>
-        {status}
+        {pill}
       </figcaption>
       <div className="phone">
         <div className="phone-screen">
           {stream ? (
             <DeviceStream
               ref={streamRef}
-              streamUrl={stream.url}
-              streamToken={stream.token}
+              streamUrl={stream.streamUrl}
+              streamToken={stream.streamToken}
               hasControl={hasControl}
               muted
               onConnectionStateChange={(isConnected) => {
                 setConnected(isConnected);
-                if (isConnected) setShownUrl(stream.url);
+                if (isConnected) setShownUrl(stream.streamUrl);
               }}
               onStreamHealed={onStreamHealed}
             />
@@ -53,7 +53,7 @@ export function PhoneFrame(props: PhoneFrameProps) {
           {onScreen ? null : (
             <div className="phone-empty">
               <BrandMark size={40} />
-              <p>{label}</p>
+              <p>{line}</p>
             </div>
           )}
         </div>
