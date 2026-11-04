@@ -11,3 +11,7 @@ uv run --locked ruff format --check .
 cd "$repo_root/examples/typescript/task-runner"
 bun install --frozen-lockfile
 bun run check
+
+cd "$repo_root/examples/typescript/tenant-portal"
+bun install --frozen-lockfile
+bun run check

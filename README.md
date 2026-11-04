@@ -32,6 +32,7 @@
 | Language | Example | What it demonstrates |
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
+| TypeScript | [White-label tenant portal](examples/typescript/tenant-portal/) | A reseller's branded portal where each end user owns one cloud phone, with server-enforced ownership and quota |
 | Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
 
 Each example is self-contained, runnable, and documents the decisions you
@@ -50,6 +51,18 @@ bun run dev
 
 Open the [task runner guide](examples/typescript/task-runner/README.md) for its
 server-only API key model and verification commands.
+
+### TypeScript tenant portal
+
+```bash
+cd examples/typescript/tenant-portal
+bun install
+cp .env.example .env
+bun run dev
+```
+
+Open the [tenant portal guide](examples/typescript/tenant-portal/README.md) for
+its ownership model and what the API leaves to your own server.
 
 ### Python webhook receiver
 
