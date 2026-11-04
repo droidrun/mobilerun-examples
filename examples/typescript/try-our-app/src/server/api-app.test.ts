@@ -116,6 +116,23 @@ describe('sessions API', () => {
     expect(third.cookie).toStartWith('visitor=');
   });
 
+  test('rejects cross-origin writes before they reach a handler', async () => {
+    const { app, calls, terminated } = setup();
+    const owner = await start(app);
+    calls.length = 0;
+    const evil = { Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' };
+    for (const [method, path] of [
+      ['POST', '/api/sessions'],
+      ['DELETE', `/api/sessions/${owner.body.id}`],
+    ] as const) {
+      const headers = { ...evil, Cookie: owner.cookie };
+      const response = await app.request(path, { method, headers });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: 'request_rejected' });
+    }
+    expect([calls, terminated]).toEqual([[], []]);
+  });
+
   test('shows the text of an API 4xx, but not of a rejected key or a 5xx', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => {});
     const { app, devices } = setup();

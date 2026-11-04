@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { getConnInfo } from 'hono/bun';
 import { getSignedCookie, setSignedCookie } from 'hono/cookie';
+import { csrf } from 'hono/csrf';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -61,7 +62,8 @@ export function createApiApp({ service, limiter, sessionSecret, secureCookies = 
   } as const;
 
   // Hono hands only Error instances to onError and rethrows anything else, which drops the
-  // connection: the catch answers those through the same mapping.
+  // connection: the catch answers those through the same mapping. csrf() refuses cross-origin
+  // writes.
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     try {
@@ -69,7 +71,7 @@ export function createApiApp({ service, limiter, sessionSecret, secureCookies = 
     } catch (error) {
       return reply(c, error);
     }
-  });
+  }, csrf());
 
   app.get('/api/health', (c) => c.json({ ok: true, sdkConfigured: service !== null }));
 
