@@ -17,7 +17,6 @@ const service = config.apiKey
         }),
       ),
       store,
-      { maxDevicesPerUser: config.maxDevicesPerUser },
     )
   : null;
 const app = createApiApp({
@@ -25,12 +24,16 @@ const app = createApiApp({
   store,
   sessionSecret: config.sessionSecret,
   production: config.production,
-  adminEmails: config.adminEmails,
 });
 
 if (!service) {
   console.warn(
-    'MOBILERUN_API_KEY is not set. The UI will load, but devices cannot be managed.',
+    'MOBILERUN_CLOUD_API_KEY is not set. The UI will load, but devices cannot be managed.',
+  );
+}
+if (config.sessionSecretGenerated) {
+  console.warn(
+    'SESSION_SECRET is not set. Using a random secret: sessions reset on restart.',
   );
 }
 

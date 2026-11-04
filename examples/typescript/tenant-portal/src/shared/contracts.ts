@@ -8,10 +8,13 @@ export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 export const sessionSchema = z.object({
   email: z.string().min(1),
-  isAdmin: z.boolean(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
+
+export const deviceActionSchema = z.enum(['stop', 'resume', 'reboot', 'reset']);
+
+export type DeviceAction = z.infer<typeof deviceActionSchema>;
 
 // What the end user sees about their own device. The Mobilerun device id never
 // leaves the server.
@@ -29,18 +32,6 @@ export const streamCredentialsSchema = z.object({
 });
 
 export type StreamCredentials = z.infer<typeof streamCredentialsSchema>;
-
-export const adminOverviewSchema = z.object({
-  users: z.array(
-    z.object({
-      email: z.string().min(1),
-      createdAt: z.string(),
-      device: z.object({ state: z.string() }).nullable(),
-    }),
-  ),
-});
-
-export type AdminOverview = z.infer<typeof adminOverviewSchema>;
 
 export const healthSchema = z.object({
   ok: z.boolean(),

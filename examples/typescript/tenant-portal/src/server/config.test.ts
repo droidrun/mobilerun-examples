@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  DEV_SESSION_SECRET,
-  normalizeApiBaseUrl,
-  parseEmailList,
-  readServerConfig,
-} from './config';
+import { normalizeApiBaseUrl, readServerConfig } from './config';
 
 const SECRET = 'a'.repeat(32);
 
@@ -26,42 +21,43 @@ describe('server config', () => {
       port: 3_000,
       production: false,
       sessionSecret: SECRET,
+      sessionSecretGenerated: false,
       databasePath: './data/portal.sqlite',
-      maxDevicesPerUser: 1,
-      adminEmails: [],
     });
   });
 
-  test('rejects a missing or short session secret', () => {
-    expect(() => readServerConfig({})).toThrow(/SESSION_SECRET/);
+  test('rejects a short session secret', () => {
     expect(() => readServerConfig({ SESSION_SECRET: 'too-short' })).toThrow(
       /at least 32/,
     );
   });
 
-  test('refuses the development secret in production', () => {
-    const environment = { SESSION_SECRET: DEV_SESSION_SECRET };
-    expect(readServerConfig(environment).production).toBe(false);
-    expect(() =>
-      readServerConfig({ ...environment, NODE_ENV: 'production' }),
-    ).toThrow(/development SESSION_SECRET/);
+  test('generates a random per-process secret outside production', () => {
+    const first = readServerConfig({});
+    const second = readServerConfig({ SESSION_SECRET: '' });
+
+    expect(first.sessionSecretGenerated).toBe(true);
+    expect(first.sessionSecret).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.sessionSecret).not.toBe(first.sessionSecret);
   });
 
-  test('validates the device quota', () => {
+  test('requires a session secret in production', () => {
+    expect(() => readServerConfig({ NODE_ENV: 'production' })).toThrow(
+      /SESSION_SECRET is required/,
+    );
     expect(
-      readServerConfig({ SESSION_SECRET: SECRET, MAX_DEVICES_PER_USER: '0' })
-        .maxDevicesPerUser,
-    ).toBe(0);
-    expect(() =>
-      readServerConfig({ SESSION_SECRET: SECRET, MAX_DEVICES_PER_USER: '2' }),
-    ).toThrow();
+      readServerConfig({ NODE_ENV: 'production', SESSION_SECRET: SECRET })
+        .sessionSecret,
+    ).toBe(SECRET);
   });
 
-  test('parses the admin email list', () => {
-    expect(parseEmailList(' Admin@Example.com, ops@example.com ,')).toEqual([
-      'admin@example.com',
-      'ops@example.com',
-    ]);
-    expect(parseEmailList(undefined)).toEqual([]);
+  test('reads the API key and URL', () => {
+    const config = readServerConfig({
+      SESSION_SECRET: SECRET,
+      MOBILERUN_CLOUD_API_KEY: 'dr_sk_test',
+      MOBILERUN_API_URL: 'https://api.example.com',
+    });
+    expect(config.apiKey).toBe('dr_sk_test');
+    expect(config.apiUrl).toBe('https://api.example.com/v1');
   });
 });

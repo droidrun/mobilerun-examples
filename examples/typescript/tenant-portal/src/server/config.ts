@@ -1,7 +1,5 @@
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-
-export const DEV_SESSION_SECRET =
-  'development-only-secret-change-me-before-deploying';
 
 const serverConfigSchema = z
   .object({
@@ -11,24 +9,24 @@ const serverConfigSchema = z
     port: z.coerce.number().int().min(1).max(65_535),
     production: z.boolean(),
     sessionSecret: z
-      .string({ error: 'SESSION_SECRET is required.' })
-      .min(32, 'SESSION_SECRET must be at least 32 characters.'),
+      .string()
+      .min(32, 'SESSION_SECRET must be at least 32 characters.')
+      .optional(),
     databasePath: z.string().trim().min(1),
-    // The schema stores one device per user, so the quota is 0 (provisioning
-    // closed) or 1. Supporting more means dropping the unique index on
-    // devices.user_id and adding a device id to the routes.
-    maxDevicesPerUser: z.coerce.number().int().min(0).max(1),
-    adminEmails: z.array(z.email()),
   })
-  .refine(
-    (config) => !(config.production && config.sessionSecret === DEV_SESSION_SECRET),
-    {
-      path: ['sessionSecret'],
-      message: 'Replace the development SESSION_SECRET before production.',
-    },
-  );
+  .refine((config) => !config.production || config.sessionSecret, {
+    path: ['sessionSecret'],
+    message: 'SESSION_SECRET is required in production (openssl rand -hex 32).',
+  });
 
-export type ServerConfig = z.infer<typeof serverConfigSchema>;
+export type ServerConfig = Omit<
+  z.infer<typeof serverConfigSchema>,
+  'sessionSecret'
+> & {
+  sessionSecret: string;
+  /** True when no SESSION_SECRET was set and a random one was generated. */
+  sessionSecretGenerated: boolean;
+};
 
 export function normalizeApiBaseUrl(
   value: string | undefined,
@@ -38,25 +36,22 @@ export function normalizeApiBaseUrl(
   return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`;
 }
 
-export function parseEmailList(value: string | undefined): Array<string> {
-  return (value ?? '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter((email) => email.length > 0);
-}
-
 export function readServerConfig(
   environment: Record<string, string | undefined>,
 ): ServerConfig {
-  return serverConfigSchema.parse({
-    apiKey: environment.MOBILERUN_API_KEY,
+  const { sessionSecret, ...config } = serverConfigSchema.parse({
+    apiKey: environment.MOBILERUN_CLOUD_API_KEY,
     apiUrl: normalizeApiBaseUrl(environment.MOBILERUN_API_URL),
     host: '127.0.0.1',
     port: environment.PORT ?? 3_000,
     production: environment.NODE_ENV === 'production',
-    sessionSecret: environment.SESSION_SECRET,
+    // An empty value (as in .env.example) counts as unset.
+    sessionSecret: environment.SESSION_SECRET?.trim() || undefined,
     databasePath: environment.DATABASE_PATH ?? './data/portal.sqlite',
-    maxDevicesPerUser: environment.MAX_DEVICES_PER_USER ?? 1,
-    adminEmails: parseEmailList(environment.ADMIN_EMAILS),
   });
+  return {
+    ...config,
+    sessionSecret: sessionSecret ?? randomBytes(32).toString('hex'),
+    sessionSecretGenerated: sessionSecret === undefined,
+  };
 }

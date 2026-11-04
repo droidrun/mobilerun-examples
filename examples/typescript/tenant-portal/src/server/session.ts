@@ -7,8 +7,12 @@ const SESSION_SECONDS = 60 * 60 * 24 * 7;
 type SessionOptions = { secret: string; secure: boolean };
 
 /**
- * Stub session: a signed cookie holding the user id. Replace this module with
- * your identity provider; the rest of the server only needs a user id.
+ * Session cookie: the signed user id and nothing else.
+ *
+ * The stub is the `POST /api/login` route in api-app.ts, where any email signs
+ * in as that user. When you wire a real identity provider, delete that route
+ * and replace this module together with it. The rest of the server only needs
+ * a user id.
  */
 export async function startSession(
   context: Context,

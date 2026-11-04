@@ -21,7 +21,6 @@ import { createPortalStore, type PortalStore } from './store';
 const SECRET = 's'.repeat(40);
 const ALICE = 'alice@example.com';
 const BOB = 'bob@example.com';
-const ADMIN = 'admin@example.com';
 
 class UpstreamError extends Error {
   constructor(
@@ -41,6 +40,11 @@ function createFakeDeps() {
     devices,
     calls,
     createFailure: null as UpstreamError | null,
+    terminateFailure: null as Error | null,
+    // When set, terminate/retrieve calls park here until a test releases them.
+    holdTerminate: false,
+    holdRetrieve: false,
+    gates: [] as Array<() => void>,
     deps: {
       async createDevice(name) {
         if (fake.createFailure) throw fake.createFailure;
@@ -58,24 +62,22 @@ function createFakeDeps() {
       },
       async retrieveDevice(deviceId) {
         calls.push({ method: 'retrieve', deviceId });
+        if (fake.holdRetrieve) {
+          await new Promise<void>((resolve) => fake.gates.push(resolve));
+        }
         const device = devices.get(deviceId);
         if (!device) throw new UpstreamError(404, {});
         return device;
       },
-      async stopDevice(deviceId) {
-        calls.push({ method: 'stop', deviceId });
-      },
-      async resumeDevice(deviceId) {
-        calls.push({ method: 'resume', deviceId });
-      },
-      async rebootDevice(deviceId) {
-        calls.push({ method: 'reboot', deviceId });
-      },
-      async resetDevice(deviceId) {
-        calls.push({ method: 'reset', deviceId });
+      async act(deviceId, action) {
+        calls.push({ method: action, deviceId });
       },
       async terminateDevice(deviceId) {
         calls.push({ method: 'terminate', deviceId });
+        if (fake.terminateFailure) throw fake.terminateFailure;
+        if (fake.holdTerminate) {
+          await new Promise<void>((resolve) => fake.gates.push(resolve));
+        }
         devices.delete(deviceId);
       },
     } satisfies PortalDeps,
@@ -83,22 +85,30 @@ function createFakeDeps() {
   return fake;
 }
 
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200 && !condition(); attempt += 1) {
+    await Bun.sleep(5);
+  }
+  expect(condition()).toBe(true);
+}
+
 let directory: string;
 let store: PortalStore;
 let fake: ReturnType<typeof createFakeDeps>;
+let errorLog: { mock: { calls: Array<Array<unknown>> } };
 
-function buildApp(options: { maxDevicesPerUser?: number; withService?: boolean } = {}) {
+function buildApp(
+  options: { withService?: boolean; store?: PortalStore } = {},
+) {
+  const portalStore = options.store ?? store;
   return createApiApp({
     service:
       options.withService === false
         ? null
-        : createPortalService(fake.deps, store, {
-            maxDevicesPerUser: options.maxDevicesPerUser ?? 1,
-          }),
-    store,
+        : createPortalService(fake.deps, portalStore),
+    store: portalStore,
     sessionSecret: SECRET,
     production: false,
-    adminEmails: [ADMIN],
   });
 }
 
@@ -107,7 +117,7 @@ type App = ReturnType<typeof buildApp>;
 async function signIn(app: App, email: string): Promise<string> {
   const response = await app.request('/api/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...SAME_ORIGIN, 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
   expect(response.status).toBe(200);
@@ -116,10 +126,13 @@ async function signIn(app: App, email: string): Promise<string> {
   return (cookie as string).split(';')[0] as string;
 }
 
+// Same-origin browser requests carry an Origin header; the CSRF guard needs it.
+const SAME_ORIGIN = { Origin: 'http://localhost' };
+
 function call(app: App, method: string, path: string, cookie?: string) {
   return app.request(path, {
     method,
-    headers: cookie ? { Cookie: cookie } : {},
+    headers: cookie ? { ...SAME_ORIGIN, Cookie: cookie } : SAME_ORIGIN,
   });
 }
 
@@ -128,7 +141,7 @@ beforeEach(() => {
   store = createPortalStore(join(directory, 'nested', 'portal.sqlite'));
   fake = createFakeDeps();
   // Expected upstream failures are logged by the server; keep test output clean.
-  spyOn(console, 'error').mockImplementation(() => {});
+  errorLog = spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -147,7 +160,7 @@ describe('session', () => {
     });
     const cookie = response.headers.get('set-cookie') ?? '';
 
-    expect(await response.json()).toEqual({ email: ALICE, isAdmin: false });
+    expect(await response.json()).toEqual({ email: ALICE });
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Lax');
     expect(cookie).toContain('portal_session=');
@@ -171,7 +184,6 @@ describe('session', () => {
       ['DELETE', '/api/device'],
       ['GET', '/api/device/stream'],
       ['POST', '/api/device/stop'],
-      ['GET', '/api/admin/users'],
     ] as const) {
       expect((await call(app, method, path)).status).toBe(401);
     }
@@ -179,18 +191,71 @@ describe('session', () => {
 
   test('rejects tampered and unsigned cookies', async () => {
     const app = buildApp();
-    const cookie = await signIn(app, ALICE);
-    const value = cookie.split('=')[1] as string;
-    const [id, signature] = decodeURIComponent(value).split('.') as [string, string];
+    const aliceCookie = await signIn(app, ALICE);
+    const bobCookie = await signIn(app, BOB);
+    const sign = (cookie: string) =>
+      decodeURIComponent(cookie.split('=')[1] as string).split('.') as [
+        string,
+        string,
+      ];
+    const [aliceId, aliceSignature] = sign(aliceCookie);
+    const [bobId, bobSignature] = sign(bobCookie);
+    expect([aliceId, bobId]).toEqual(['1', '2']);
 
-    const tampered = `portal_session=${encodeURIComponent(`2.${signature}`)}`;
-    const unsigned = `portal_session=${id}`;
-    const forgedSignature = `portal_session=${encodeURIComponent(`${id}.AAAA`)}`;
+    const cookie = (id: string, signature: string) =>
+      `portal_session=${encodeURIComponent(`${id}.${signature}`)}`;
+    // Flip one character of Alice's valid signature: same length and encoding.
+    const flipped = aliceSignature.replace(
+      /.$/,
+      aliceSignature.endsWith('A') ? 'B' : 'A',
+    );
 
-    for (const forged of [tampered, unsigned, forgedSignature]) {
+    for (const forged of [
+      // Bob exists, so only a failed MAC check can reject Alice's signature on his id.
+      cookie(bobId, aliceSignature),
+      cookie(aliceId, bobSignature),
+      cookie(aliceId, flipped),
+      `portal_session=${aliceId}`,
+      cookie(aliceId, 'AAAA'),
+    ]) {
       expect((await call(app, 'GET', '/api/me', forged)).status).toBe(401);
     }
-    expect((await call(app, 'GET', '/api/me', cookie)).status).toBe(200);
+    expect((await call(app, 'GET', '/api/me', aliceCookie)).status).toBe(200);
+    expect((await call(app, 'GET', '/api/me', bobCookie)).status).toBe(200);
+  });
+
+  test('rejects cross-origin writes before they reach a handler', async () => {
+    const app = buildApp();
+    const cookie = await signIn(app, ALICE);
+    await call(app, 'POST', '/api/device', cookie);
+    fake.calls.length = 0;
+
+    for (const [method, path] of [
+      ['POST', '/api/device/stop'],
+      ['POST', '/api/device'],
+      ['DELETE', '/api/device'],
+    ] as const) {
+      const response = await app.request(path, {
+        method,
+        headers: {
+          Cookie: cookie,
+          Origin: 'https://evil.example',
+          'Sec-Fetch-Site': 'cross-site',
+        },
+      });
+      expect(response.status).toBe(403);
+    }
+    const login = await app.request('/api/login', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://evil.example',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'email=eve%40example.com',
+    });
+    expect(login.status).toBe(403);
+    expect(fake.calls).toEqual([]);
+    expect(store.getDeviceId(1)).toBe('device-1');
   });
 
   test('logout clears the cookie', async () => {
@@ -216,7 +281,7 @@ describe('session', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       error: 'missing_api_key',
-      message: 'Set MOBILERUN_API_KEY on the server.',
+      message: 'Set MOBILERUN_CLOUD_API_KEY on the server.',
     });
   });
 });
@@ -244,7 +309,7 @@ describe('device lifecycle', () => {
     const second = await call(app, 'POST', '/api/device', cookie);
 
     expect(second.status).toBe(409);
-    expect((await second.json()).error).toBe('device_quota_reached');
+    expect((await second.json()).error).toBe('device_exists');
     expect(fake.devices.size).toBe(1);
   });
 
@@ -260,13 +325,6 @@ describe('device lifecycle', () => {
     expect(fake.devices.size).toBe(1);
   });
 
-  test('a quota of zero closes provisioning', async () => {
-    const app = buildApp({ maxDevicesPerUser: 0 });
-    const cookie = await signIn(app, ALICE);
-    expect((await call(app, 'POST', '/api/device', cookie)).status).toBe(409);
-    expect(fake.devices.size).toBe(0);
-  });
-
   test('renders Mobilerun API errors as returned', async () => {
     fake.createFailure = new UpstreamError(422, {
       message: 'Device type unavailable.',
@@ -280,7 +338,7 @@ describe('device lifecycle', () => {
       error: 'upstream_rejected',
       message: 'Device type unavailable.',
     });
-    expect(store.countDevices(1)).toBe(0);
+    expect(store.getDeviceId(1)).toBeUndefined();
   });
 
   test('does not blame the end user for a bad portal API key', async () => {
@@ -362,6 +420,118 @@ describe('device lifecycle', () => {
   });
 });
 
+describe('device creation failures', () => {
+  test('a store that throws on insert releases the new device', async () => {
+    const throwing: PortalStore = {
+      ...store,
+      insertDevice() {
+        throw new Error('SQLITE_BUSY');
+      },
+    };
+    const app = buildApp({ store: throwing });
+    const cookie = await signIn(app, ALICE);
+    const response = await call(app, 'POST', '/api/device', cookie);
+
+    expect(response.status).toBe(502);
+    expect(fake.calls).toEqual([{ method: 'terminate', deviceId: 'device-1' }]);
+    expect(fake.devices.size).toBe(0);
+    expect(store.getDeviceId(1)).toBeUndefined();
+    expect(errorLog.mock.calls.some((args) => args.includes('device-1'))).toBe(true);
+  });
+
+  test('logs the device id when the release itself fails', async () => {
+    const throwing: PortalStore = {
+      ...store,
+      insertDevice() {
+        throw new Error('SQLITE_BUSY');
+      },
+    };
+    fake.terminateFailure = new Error('terminate failed');
+    const app = buildApp({ store: throwing });
+    const cookie = await signIn(app, ALICE);
+    const response = await call(app, 'POST', '/api/device', cookie);
+
+    expect(response.status).toBe(502);
+    expect(fake.devices.has('device-1')).toBe(true);
+    const stillRunning = errorLog.mock.calls.filter(
+      (args) =>
+        args.includes('device-1') &&
+        String(args[0]).includes('still running'),
+    );
+    expect(stillRunning).toHaveLength(1);
+  });
+
+  test('a lost insert race releases the new device and answers 409', async () => {
+    const racing: PortalStore = { ...store, insertDevice: () => false };
+    const app = buildApp({ store: racing });
+    const cookie = await signIn(app, ALICE);
+    const response = await call(app, 'POST', '/api/device', cookie);
+
+    expect(response.status).toBe(409);
+    expect(fake.calls).toEqual([{ method: 'terminate', deviceId: 'device-1' }]);
+  });
+});
+
+describe('late requests', () => {
+  test('a second DELETE does not remove a replacement device row', async () => {
+    const app = buildApp();
+    const cookie = await signIn(app, ALICE);
+    await call(app, 'POST', '/api/device', cookie);
+
+    fake.holdTerminate = true;
+    const first = call(app, 'DELETE', '/api/device', cookie);
+    const second = call(app, 'DELETE', '/api/device', cookie);
+    await waitFor(() => fake.gates.length === 2);
+
+    fake.gates[0]?.();
+    expect((await first).status).toBe(204);
+    fake.holdTerminate = false;
+    expect((await call(app, 'POST', '/api/device', cookie)).status).toBe(201);
+    expect(store.getDeviceId(1)).toBe('device-2');
+
+    fake.gates[1]?.();
+    expect((await second).status).toBe(204);
+    expect(store.getDeviceId(1)).toBe('device-2');
+    expect((await call(app, 'GET', '/api/device', cookie)).status).toBe(200);
+  });
+
+  test('a stale GET that finds 404 does not remove a replacement row', async () => {
+    const app = buildApp();
+    const cookie = await signIn(app, ALICE);
+    await call(app, 'POST', '/api/device', cookie);
+
+    fake.holdRetrieve = true;
+    const stale = call(app, 'GET', '/api/device', cookie);
+    await waitFor(() => fake.gates.length === 1);
+
+    fake.holdRetrieve = false;
+    expect((await call(app, 'DELETE', '/api/device', cookie)).status).toBe(204);
+    expect((await call(app, 'POST', '/api/device', cookie)).status).toBe(201);
+
+    fake.gates[0]?.();
+    expect((await stale).status).toBe(404);
+    expect(store.getDeviceId(1)).toBe('device-2');
+  });
+
+  test('a vanished device is unlinked exactly once', async () => {
+    const deletes: Array<[number, string]> = [];
+    const counting: PortalStore = {
+      ...store,
+      deleteDevice(userId, deviceId) {
+        deletes.push([userId, deviceId]);
+        store.deleteDevice(userId, deviceId);
+      },
+    };
+    const app = buildApp({ store: counting });
+    const cookie = await signIn(app, ALICE);
+    await call(app, 'POST', '/api/device', cookie);
+    fake.devices.clear();
+
+    expect((await call(app, 'GET', '/api/device', cookie)).status).toBe(404);
+    expect(deletes).toEqual([[1, 'device-1']]);
+  });
+});
+
 describe('ownership', () => {
   test('another user gets 404 on every device route and touches nothing', async () => {
     const app = buildApp();
@@ -425,32 +595,5 @@ describe('ownership', () => {
 
     await call(app, 'POST', '/api/device/reboot', bob);
     expect(fake.calls).toEqual([{ method: 'reboot', deviceId: 'device-2' }]);
-  });
-});
-
-describe('admin overview', () => {
-  test('is forbidden for regular users', async () => {
-    const app = buildApp();
-    const cookie = await signIn(app, ALICE);
-    expect((await call(app, 'GET', '/api/admin/users', cookie)).status).toBe(403);
-  });
-
-  test('lists users with device state for admins only', async () => {
-    const app = buildApp();
-    const alice = await signIn(app, ALICE);
-    await signIn(app, BOB);
-    const admin = await signIn(app, ADMIN);
-    await call(app, 'POST', '/api/device', alice);
-
-    const response = await call(app, 'GET', '/api/admin/users', admin);
-    const body = await response.json();
-    expect(response.status).toBe(200);
-    expect(
-      body.users.map((u: { email: string; device: unknown }) => [u.email, u.device]),
-    ).toEqual([
-      [ALICE, { state: 'creating' }],
-      [BOB, null],
-      [ADMIN, null],
-    ]);
   });
 });

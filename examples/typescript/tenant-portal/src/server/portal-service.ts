@@ -1,5 +1,5 @@
 import type {
-  AdminOverview,
+  DeviceAction,
   DeviceView,
   StreamCredentials,
 } from '@/shared/contracts';
@@ -19,18 +19,15 @@ export type RemoteDevice = {
 export type PortalDeps = {
   createDevice(name: string): Promise<RemoteDevice>;
   retrieveDevice(deviceId: string): Promise<RemoteDevice>;
-  stopDevice(deviceId: string): Promise<void>;
-  resumeDevice(deviceId: string): Promise<void>;
-  rebootDevice(deviceId: string): Promise<void>;
-  resetDevice(deviceId: string): Promise<void>;
+  act(deviceId: string, action: DeviceAction): Promise<void>;
   terminateDevice(deviceId: string): Promise<void>;
 };
 
 export class PortalError extends Error {
-  readonly status: number;
+  readonly status: 404 | 409;
   readonly code: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: 404 | 409, code: string, message: string) {
     super(message);
     this.name = 'PortalError';
     this.status = status;
@@ -41,16 +38,10 @@ export class PortalError extends Error {
 export type PortalService = {
   create(userId: number): Promise<DeviceView>;
   get(userId: number): Promise<DeviceView>;
-  stop(userId: number): Promise<void>;
-  resume(userId: number): Promise<void>;
-  reboot(userId: number): Promise<void>;
-  reset(userId: number): Promise<void>;
+  act(userId: number, action: DeviceAction): Promise<void>;
   terminate(userId: number): Promise<void>;
   stream(userId: number): Promise<StreamCredentials>;
-  adminOverview(): Promise<AdminOverview>;
 };
-
-type ServiceOptions = { maxDevicesPerUser: number };
 
 function toView(device: RemoteDevice): DeviceView {
   return {
@@ -72,52 +63,47 @@ function isNotFound(error: unknown): boolean {
 const noDevice = () =>
   new PortalError(404, 'no_device', 'You do not have a device.');
 
+const alreadyHasDevice = () =>
+  new PortalError(409, 'device_exists', 'You already have a device.');
+
 export function createPortalService(
   deps: PortalDeps,
   store: PortalStore,
-  options: ServiceOptions,
 ): PortalService {
   const creating = new Set<number>();
 
   // The device id always comes from the session user's own row. Nothing the
-  // client sends can select a different device.
+  // client sends can select a different device. Cleanup below only ever
+  // removes the link to the device a request captured here, so a late request
+  // cannot delete the row of a replacement device.
   function ownDeviceId(userId: number): string {
     const deviceId = store.getDeviceId(userId);
     if (!deviceId) throw noDevice();
     return deviceId;
   }
 
-  const quotaReached = () =>
-    new PortalError(
-      409,
-      'device_quota_reached',
-      'You already have a device.',
-    );
-
-  async function act(
-    userId: number,
-    action: (deviceId: string) => Promise<void>,
-  ): Promise<void> {
-    await action(ownDeviceId(userId));
-  }
-
   return {
     async create(userId) {
-      if (
-        creating.has(userId) ||
-        store.countDevices(userId) >= options.maxDevicesPerUser
-      ) {
-        throw quotaReached();
+      if (creating.has(userId) || store.getDeviceId(userId)) {
+        throw alreadyHasDevice();
       }
       creating.add(userId);
       try {
+        // Retries are off in the adapter: a repeated create could bill twice.
         const device = await deps.createDevice(`tenant-${userId}`);
-        if (!store.insertDevice(userId, device.id)) {
-          // Lost a race or the device id is already linked: release it.
-          await deps.terminateDevice(device.id).catch((error: unknown) => {
-            console.error('orphaned device cleanup failed', error);
+        try {
+          if (!store.insertDevice(userId, device.id)) throw alreadyHasDevice();
+        } catch (error) {
+          // The device exists and bills, but we could not record the owner.
+          console.error('releasing device that could not be linked', device.id, error);
+          await deps.terminateDevice(device.id).catch((terminateError: unknown) => {
+            console.error(
+              'device is still running and not linked to any user',
+              device.id,
+              terminateError,
+            );
           });
-          throw quotaReached();
+          throw error;
         }
         return toView(device);
       } finally {
@@ -127,27 +113,25 @@ export function createPortalService(
 
     async get(userId) {
       const deviceId = ownDeviceId(userId);
+      let device: RemoteDevice;
       try {
-        const device = await deps.retrieveDevice(deviceId);
-        if (device.state === 'terminated') {
-          store.deleteDevice(userId);
-          throw noDevice();
-        }
-        return toView(device);
+        device = await deps.retrieveDevice(deviceId);
       } catch (error) {
-        if (isNotFound(error)) {
-          // The device no longer exists upstream: drop the stale link.
-          store.deleteDevice(userId);
-          throw noDevice();
-        }
-        throw error;
+        if (!isNotFound(error)) throw error;
+        // The device no longer exists upstream: drop the stale link.
+        store.deleteDevice(userId, deviceId);
+        throw noDevice();
       }
+      if (device.state === 'terminated') {
+        store.deleteDevice(userId, deviceId);
+        throw noDevice();
+      }
+      return toView(device);
     },
 
-    stop: (userId) => act(userId, (id) => deps.stopDevice(id)),
-    resume: (userId) => act(userId, (id) => deps.resumeDevice(id)),
-    reboot: (userId) => act(userId, (id) => deps.rebootDevice(id)),
-    reset: (userId) => act(userId, (id) => deps.resetDevice(id)),
+    async act(userId, action) {
+      await deps.act(ownDeviceId(userId), action);
+    },
 
     async terminate(userId) {
       const deviceId = ownDeviceId(userId);
@@ -156,7 +140,7 @@ export function createPortalService(
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
-      store.deleteDevice(userId);
+      store.deleteDevice(userId, deviceId);
     },
 
     async stream(userId) {
@@ -169,22 +153,6 @@ export function createPortalService(
         );
       }
       return { streamUrl: device.streamUrl, streamToken: device.streamToken };
-    },
-
-    async adminOverview() {
-      const users = await Promise.all(
-        store.listUsersWithDevices().map(async (user) => {
-          let device: { state: string } | null = null;
-          if (user.deviceId) {
-            device = await deps
-              .retrieveDevice(user.deviceId)
-              .then((remote) => ({ state: remote.state }))
-              .catch(() => ({ state: 'unknown' }));
-          }
-          return { email: user.email, createdAt: user.createdAt, device };
-        }),
-      );
-      return { users };
     },
   };
 }
