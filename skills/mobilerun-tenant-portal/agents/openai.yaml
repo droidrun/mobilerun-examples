@@ -1,4 +1,4 @@
 interface:
   display_name: "Mobilerun Tenant Portal"
   short_description: "Build white-label per-user cloud device portals"
-  default_prompt: "Use $mobilerun-tenant-portal to build and test a server-side portal where each end user owns one Mobilerun cloud device with a live stream."
+  default_prompt: "Use $mobilerun-tenant-portal to build and test a branded portal where each end user owns one Mobilerun cloud phone with a live stream."

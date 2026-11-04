@@ -1,171 +1,116 @@
-# White-label tenant portal
+# Tenant portal: a white-label phone per user
 
-A fictional reseller, **Kestrel MyPhone**, sells a cloud Android phone under its
-own brand. Each customer signs in, owns at most one phone, and can create it,
-stop and start it, restart it, reset it, delete it, and control it live in the
-browser. Customers never see Mobilerun; the reseller's server talks to the
-Mobilerun API with one organisation API key.
+A fictional company, **Fernly**, sells **Fernly Phone**: an Android cloud phone
+under its own brand. Each customer signs in, owns at most one phone, and can
+get it, stop and start it, restart it, reset it, delete it, and use it live in
+the browser. Customers never see Mobilerun; Fernly's server talks to the
+Mobilerun API with one organisation key.
 
 ```text
-browser ──cookie session──▶ Bun + Hono (this example) ──@mobilerun/sdk──▶ Mobilerun API
-   │                              │
-   │                              └── SQLite: users, devices (who owns which device)
-   └──@mobilerun/react + short-lived stream token───────────────────────▶ device stream
+browser ──cookie session──▶ Bun + Hono ──@mobilerun/sdk──▶ Mobilerun API
+   │                            └── SQLite: users, and which device each one owns
+   └──@mobilerun/react + short-lived stream token──────▶ phone stream
 ```
 
 ## What it shows
 
-- ownership enforced by the reseller's own server: every device route resolves
-  the device from the signed-in user's row, never from a client-supplied id, and
+- ownership enforced by your own server: every device route resolves the
+  device from the signed-in user's row, never from a client-supplied id;
   anything else is a `404`;
-- one device per user, enforced by a unique index and answered with `409` when
-  the user already has one;
-- the device lifecycle with `devices.create`, `retrieve`, `stop`, `resume`,
-  `reboot`, `reset` and `terminate`;
-- a live, controllable screen with `<DeviceStream hasControl>`,
-  `<NavigationBar>` and `<StreamStatusPill>` from `@mobilerun/react`;
-- Mobilerun API errors (for example an unavailable device type or an
-  insufficient balance) shown to the user as the API returned them, with no
-  client-side gates;
-- a brand file (`brand.json`) that drives the page and the stream components'
-  colors, with no Mobilerun branding in the customer UI.
-
-## Requirements
-
-- [Bun](https://bun.sh/)
-- a Mobilerun API key
+- one device per user (a unique index, `409` for a second one);
+- the lifecycle with `devices.create`, `retrieve`, `stop`, `resume`, `reboot`,
+  `reset` and `terminate`;
+- stream credentials only for the caller's own phone, decided by the server;
+- a brand file (`brand.json`) that re-themes the whole page from one accent
+  colour.
 
 ## Run it
+
+You need [Bun](https://bun.sh/) and a Mobilerun API key with access to Android
+cloud phones.
 
 ```bash
 cd examples/typescript/tenant-portal
 bun install
-cp .env.example .env
+cp .env.example .env   # set MOBILERUN_CLOUD_API_KEY
 bun run dev
 ```
 
-Set the server-side key in `.env`:
-
-```dotenv
-MOBILERUN_CLOUD_API_KEY=dr_sk_...
-```
-
 Open [http://localhost:3000](http://localhost:3000) and sign in with any email.
-Without an API key the page still loads and shows an "API key missing" notice.
-Leave `SESSION_SECRET` empty for local runs: the server then makes a random one
-per process and sessions reset on restart.
+**Get my phone** creates a real phone and uses your account's balance. The
+server binds to `127.0.0.1`.
 
-Creating a device uses your account's balance or plan, so the example does
-nothing until you click **Get my phone**.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MOBILERUN_CLOUD_API_KEY` | none | Server-side API key; never sent to the browser |
+| `MOBILERUN_API_URL` | SDK default | API base URL; `/v1` is added when missing |
+| `PORT` | `3000` | Listen port |
+| `SESSION_SECRET` | random per process | Cookie signing secret, at least 32 characters; required in production |
+| `DATABASE_PATH` | `./data/portal.sqlite` | SQLite file |
 
-The bind address is `127.0.0.1` by design. Change it deliberately when you
-deploy.
+Without an API key the page still loads; device requests answer
+`500 missing_api_key` and the server logs a warning. With `SESSION_SECRET`
+empty, sessions reset whenever the server restarts.
 
 ## How it works
 
-1. `POST /api/login { email }` creates the user if needed and sets a signed
-   `HttpOnly`, `SameSite=Lax` session cookie (`hono/cookie`, signed with
-   `SESSION_SECRET`). `POST /api/logout` clears it. **The login route is the
-   stub:** anyone can sign in as any email. When you wire a real identity
-   provider, delete that route and replace `src/server/session.ts` together
-   with it. Writes are also guarded by `hono/csrf`.
-2. The browser only calls the portal's own `/api/*` routes. The server holds
-   `MOBILERUN_CLOUD_API_KEY` and is the only code that calls `@mobilerun/sdk`
-   (`src/server/mobilerun-adapter.ts`).
-3. SQLite (`bun:sqlite`) stores `users(id, email, created_at)` and
-   `devices(user_id, device_id, created_at)`, both unique, so one user owns at
-   most one device and one device belongs to at most one user.
-4. Creating a device calls `devices.create({ deviceType: 'android_cloud_phone',
-   name: 'tenant-<userId>' })` (SDK retries off, so a retry cannot bill twice)
-   and stores the returned id against the user. If the id cannot be stored, the
-   new device is terminated again. The Mobilerun device id is never sent to the
-   browser.
-5. For the live screen, the server returns only `streamUrl` and `streamToken` of
-   the caller's own device, or `409` while the device is not streaming yet; the
-   browser asks, retries with backoff, and connects to the stream directly.
-
-| Route | What it does |
-| --- | --- |
-| `POST /api/login`, `POST /api/logout`, `GET /api/me` | stub session |
-| `POST /api/device` | create the caller's device (`409` if the user already has one) |
-| `GET /api/device` | its state |
-| `POST /api/device/:action` | `stop`, `resume`, `reboot` or `reset` |
-| `DELETE /api/device` | terminate the device and delete the row |
-| `GET /api/device/stream` | `{ streamUrl, streamToken }` |
-| `GET /api/health` | whether the API key is configured |
-
-Source layout:
-
-```text
-brand.json                    # name, logo path, colors
-src/
-├── server/
-│   ├── api-app.ts            # Hono routes and error mapping
-│   ├── portal-service.ts     # ownership, one device per user, orchestration
-│   ├── mobilerun-adapter.ts  # the only @mobilerun/sdk calls
-│   ├── store.ts              # SQLite users and device ownership
-│   ├── session.ts            # signed-cookie session (replace with your IdP)
-│   └── config.ts             # zod-validated environment
-├── client/                   # sign-in, device card, live screen
-└── shared/contracts.ts       # zod schemas for the browser boundary
-```
-
-## Configuration
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MOBILERUN_CLOUD_API_KEY` | none | Organisation API key, server only |
-| `MOBILERUN_API_URL` | `https://api.mobilerun.ai/v1` | API base override (`/v1` is added if missing) |
-| `SESSION_SECRET` | random per process | Cookie signing secret, at least 32 characters; required in production |
-| `DATABASE_PATH` | `./data/portal.sqlite` | SQLite file |
-| `PORT` | `3000` | Listen port |
-
-Each user owns one device. Supporting several would mean dropping the unique
-index on `devices.user_id` and adding a device id to the routes.
-
-## Branding
-
-Edit `brand.json`: `name`, `tagline`, `logoPath` (an SVG path in a 24×24 box)
-and four colors. `src/brand.ts` maps them onto CSS variables
-(`--primary`, `--background`, `--card`, ...) that both the page and the
-`@mobilerun/react` components read.
+- **Sign-in** (`POST /api/login`) is the stub: any email signs in as that user
+  and gets a signed `HttpOnly`, `SameSite=Lax` cookie. Replace this route
+  together with `src/server/session.ts` by your identity provider. Writes are
+  also checked by `hono/csrf`.
+- **One device per user**: `POST /api/device` creates the phone with SDK retries
+  off (a retried create could bill a second phone) and links its id to the
+  user. If the link cannot be stored, the new phone is terminated again and its
+  id is logged. The Mobilerun device id never reaches the browser.
+- **Actions**: `POST /api/device/:action` (`stop`, `resume`, `reboot`, `reset`)
+  and `DELETE /api/device` always act on the caller's own device. Cleanup only
+  removes the link to the device that request looked up, so a late request
+  cannot unlink a replacement phone.
+- **State**: `GET /api/device` returns `{ state, createdAt }`. A device that is
+  gone upstream is unlinked. The page polls one request at a time while the
+  phone moves between states and backs off while requests fail.
+- **Stream**: `GET /api/device/stream` returns `streamUrl` and `streamToken`, or
+  `409` while the phone is not streaming. The page asks on every state change,
+  retries with backoff, and asks again when the stream reconnects.
+- **Errors**: the server's own refusals and Mobilerun's 4xx answers (for
+  example an unavailable device type or an insufficient balance) keep their
+  status and text. A `401`/`403` from the API means your key is wrong, not the
+  user's session, so it becomes a plain `502`.
 
 ## What the Mobilerun API does not do for you
 
-- **One organisation key.** There are no sub-accounts and no per-end-user API
-  keys. Your server holds the only key, so your server must decide who may touch
-  which device.
-- **No metadata or tags on devices or tasks.** The mapping from your customer
-  to a device lives in your own database. The `tenant-<userId>` device name is a
-  convenience, not an access control.
-- **No per-end-user billing.** Usage lands on your account. Charging your
-  customers, and limiting what each can spend, is your job.
+- **One org key.** There are no sub-accounts and no per-end-user keys; your
+  server holds the key and decides who may touch which device.
+- **No metadata on devices.** The API does not know which customer owns a
+  phone. This example keeps that mapping in SQLite; the `tenant-<userId>`
+  device name is a convenience, not access control.
+- **No per-end-user billing.** Usage is billed to your organization; charging
+  customers and capping what each one can spend is your job.
+
+## Before production
+
+- Replace the stub login and `src/server/session.ts` with your identity
+  provider. The cookie is only a signed user id: there is no server-side expiry
+  or revocation.
+- Set `SESSION_SECRET` (`openssl rand -hex 32`) and keep it and the API key in a
+  secrets manager. Serve over HTTPS; the cookie is `Secure` in production.
+- Use a persistent, backed-up database if you run more than one process.
+- Add rate limiting and auditing, especially on device creation.
+- Upstream 4xx text is shown as the API returned it; map it to your own copy.
+
+## Brand and design
+
+`brand.json` holds the company, product name, tagline, accent colour and a
+24×24 SVG path for the logo. `src/client/theme.css` is a small token-based
+design system (light and dark), and `src/client/components/` has the app shell
+and the phone frame around `@mobilerun/react`. These files are shared verbatim
+with the other white-label examples; page-specific styles live in
+`src/styles.css`.
 
 ## Verify
 
 ```bash
-bun run check
+bun run check   # tests, typecheck, build
 ```
 
-The tests use a fake adapter and a temporary SQLite file. They cover
-cross-user `404`s on every device route, one device per user, tampered and
-unsigned cookies, cross-origin writes, logout, termination, late requests that
-must not touch a replacement device, and configuration validation.
-
-## Before production
-
-- Delete the stub `POST /api/login` route and replace it, together with
-  `src/server/session.ts`, with your identity provider.
-- There is no server-side session expiry or revocation: the cookie is only a
-  signed user id.
-- Upstream error text is shown as the API returned it. Map it to your own copy
-  for a white-label product.
-- Use a persistent, backed-up database instead of a local SQLite file, and
-  think about concurrent writers and several server processes.
-- Add rate limiting and auditing, especially on device creation.
-- Set `SESSION_SECRET` (`openssl rand -hex 32`) and keep it and
-  `MOBILERUN_CLOUD_API_KEY` in a secrets manager.
-- Serve over HTTPS (the session cookie is `Secure` in production). The bind
-  address is local by design; change it deliberately when you deploy, for
-  example behind your own reverse proxy.
-- Decide how you bill customers and cap what a single customer can spend.
+The tests fake the SDK and never call the API.
