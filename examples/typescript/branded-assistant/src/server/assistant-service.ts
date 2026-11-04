@@ -1,9 +1,10 @@
 import type Mobilerun from '@mobilerun/sdk';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { isTerminal, type RunStatus, type RunView, type TimelineEntry } from '@/shared/contracts';
-import * as config from './assistant';
+import * as catalog from './assistant';
 import type { Ledger, RunRecord, Settlement } from './ledger';
 
-const { assistant, presets } = config;
+const { assistant, presets } = catalog;
 const DEADLINE_MARGIN_MS = 60_000;
 const MAX_TIMELINE = 60;
 const UNREACHABLE = 'Your assistant is hard to reach right now. Retrying.';
@@ -16,12 +17,9 @@ const STATUS: Record<string, RunStatus> = { running: 'running', cancelling: 'can
 
 /** A refusal of this server's own: a stable code, an HTTP status, text a user may read. */
 export class AssistantError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
+  constructor(readonly code: string, readonly status: ContentfulStatusCode, message: string) {
     super(message);
   }
-}
-function refuse(code: string, status: number, message: string): never {
-  throw new AssistantError(code, status, message);
 }
 const statusOf = (error: unknown) => (error as { status?: unknown } | null)?.status;
 /** The API definitely refused: a 4xx other than 408. Timeouts, 5xx and network errors may not. */
@@ -42,9 +40,15 @@ type Options = {
 export type AssistantService = ReturnType<typeof createAssistantService>;
 
 /** Runs, notes and settlement, and every @mobilerun/sdk call this example makes. */
-export function createAssistantService(options: Options) {
-  const { client, ledger, deviceIds, reservePerRun, pollIntervalMs, now = Date.now } = options;
-  const { schedule = (tick, ms) => void setTimeout(tick, ms).unref() } = options;
+export function createAssistantService({
+  client,
+  ledger,
+  deviceIds,
+  reservePerRun,
+  pollIntervalMs,
+  schedule = (tick, ms) => void setTimeout(tick, ms).unref(),
+  now = Date.now,
+}: Options) {
   const deadlineMs = assistant.executionTimeout * 1_000 + DEADLINE_MARGIN_MS;
   const busyPhones = new Set<string>();
   /** Active runs only; the timeline is saved when the run settles. */
@@ -52,8 +56,11 @@ export function createAssistantService(options: Options) {
   /** Task ids the database failed to record after the API accepted the task. */
   const pendingTaskIds = new Map<string, string>();
 
-  const tasks = () =>
-    client?.tasks ?? refuse('missing_api_key', 503, 'The assistant is not set up yet.');
+  // api-app refuses every run route without a key, so the SDK calls below always have a client.
+  const tasks = () => {
+    if (!client) throw new Error('No Mobilerun client: MOBILERUN_CLOUD_API_KEY is not set.');
+    return client.tasks;
+  };
   const liveRun = (runId: string) => {
     if (!live.has(runId)) live.set(runId, { timeline: [], steps: 0 });
     return live.get(runId)!;
@@ -66,7 +73,8 @@ export function createAssistantService(options: Options) {
   const owned = (userId: string, runId: string) => {
     const run = ledger.run(runId);
     // Someone else's run answers exactly like an unknown one.
-    return run?.userId === userId ? run : refuse('run_not_found', 404, 'Run not found.');
+    if (run?.userId !== userId) throw new AssistantError('run_not_found', 404, 'Run not found.');
+    return run;
   };
   /** The task may exist but we cannot tell: the reservation and the phone stay held. */
   const markUnknown = (runId: string) => {
@@ -85,7 +93,7 @@ export function createAssistantService(options: Options) {
     return {
       id, presetId, request, status, steps, message, charged, createdAt,
       timeline: live.get(id)?.timeline ?? run.timeline ?? [],
-      result: preset && parsed?.success ? config.resultOf(preset, parsed.data) : null,
+      result: preset && parsed?.success ? catalog.resultOf(preset, parsed.data) : null,
       rawOutput: unreadable ? JSON.stringify(output, null, 2).slice(0, 4_000) : null,
       error: live.get(id)?.error ?? (status === 'unknown' ? UNCONFIRMED : null),
       balance: ledger.balance(run.userId),
@@ -116,7 +124,8 @@ export function createAssistantService(options: Options) {
     if (!taskId) return; // an unconfirmed start waits for its deadline
 
     const entry = liveRun(run.id);
-    let state, result;
+    let state: Mobilerun.TaskGetStatusResponse;
+    let result: Mobilerun.TaskRetrieveResponse | undefined;
     try {
       state = await tasks().getStatus(taskId);
       if (isTerminal(STATUS[state.status] ?? 'starting')) result = await tasks().retrieve(taskId);
@@ -166,38 +175,47 @@ export function createAssistantService(options: Options) {
     },
 
     async start(userId: string, presetId: string, request: string) {
-      const api = tasks();
       const preset = presets.find((item) => item.id === presetId);
-      if (!preset) refuse('unknown_preset', 400, 'Choose one of the requests.');
-      if (!deviceIds.length) refuse('no_devices', 503, 'No phones are set up yet.');
+      if (!preset) throw new AssistantError('unknown_preset', 400, 'Choose one of the requests.');
+      if (!deviceIds.length) {
+        throw new AssistantError('no_devices', 503, 'No phones are set up yet.');
+      }
       // One run per phone: a busy pool answers at once instead of queueing.
       const deviceId = deviceIds.find((id) => !busyPhones.has(id));
-      if (!deviceId) refuse('device_busy', 409, 'Every phone is busy. Try again in a minute.');
+      if (!deviceId) {
+        throw new AssistantError('device_busy', 409, 'Every phone is busy. Try again in a minute.');
+      }
       const runId = crypto.randomUUID();
       busyPhones.add(deviceId);
-      let outcome;
+      let outcome: ReturnType<Ledger['reserve']> | undefined;
       try {
-        const amount = reservePerRun;
-        outcome = ledger.reserve({ userId, runId, deviceId, presetId, request, amount });
+        const reservation = { userId, runId, deviceId, presetId, request, amount: reservePerRun };
+        outcome = ledger.reserve(reservation);
       } finally {
         if (outcome !== 'ok') busyPhones.delete(deviceId);
       }
-      if (outcome === 'run_active') refuse('run_active', 409, 'You already have a request going.');
+      if (outcome === 'run_active') {
+        throw new AssistantError('run_active', 409, 'You already have a request going.');
+      }
       if (outcome === 'insufficient') {
-        const have = ledger.balance(userId);
-        refuse('insufficient_credits', 402, `A request holds ${reservePerRun}; you have ${have}.`);
+        const message = `A request holds ${reservePerRun}; you have ${ledger.balance(userId)}.`;
+        throw new AssistantError('insufficient_credits', 402, message);
       }
 
       let taskId: string | undefined;
       try {
         const { llmModel, maxSteps, executionTimeout } = assistant;
-        const { systemPrompt } = config;
-        const outputSchema = config.outputSchemaFor(preset);
-        const task = config.taskFor(preset, request);
-        const limits = { maxSteps, executionTimeout, ...(llmModel ? { llmModel } : {}) };
-        const params = { deviceId, task, systemPrompt, outputSchema, ...limits };
+        const params = {
+          deviceId,
+          task: catalog.taskFor(preset, request),
+          systemPrompt: catalog.systemPrompt,
+          outputSchema: catalog.outputSchemaFor(preset),
+          maxSteps,
+          executionTimeout,
+          ...(llmModel ? { llmModel } : {}),
+        };
         // No SDK retries: a retried start could create the task twice.
-        taskId = (await api.run(params, { maxRetries: 0 })).id;
+        taskId = (await tasks().run(params, { maxRetries: 0 })).id;
         ledger.attachTask(runId, taskId);
         note(runId, 'status', 'Started');
       } catch (error) {
@@ -223,22 +241,28 @@ export function createAssistantService(options: Options) {
     get: (userId: string, runId: string) => view(owned(userId, runId)),
 
     async sendNote(userId: string, runId: string, text: string) {
-      const api = tasks();
       const run = owned(userId, runId);
-      if (isTerminal(run.status)) refuse('run_finished', 409, 'This request has already finished.');
-      if (!run.taskId) refuse('run_starting', 409, 'Your request is still starting.');
-      const { sent } = await api.sendMessage(run.taskId, { message: config.noteFor(text) });
-      if (!sent) refuse('message_not_sent', 409, "Your note couldn't be delivered. Try again.");
+      if (isTerminal(run.status)) {
+        throw new AssistantError('run_finished', 409, 'This request has already finished.');
+      }
+      if (!run.taskId) {
+        throw new AssistantError('run_starting', 409, 'Your request is still starting.');
+      }
+      const message = catalog.noteFor(text);
+      const { sent } = await tasks().sendMessage(run.taskId, { message });
+      if (!sent) {
+        const notSent = "Your note couldn't be delivered. Try again.";
+        throw new AssistantError('message_not_sent', 409, notSent);
+      }
       note(runId, 'user', text);
       return view(run);
     },
 
     async cancel(userId: string, runId: string) {
-      const api = tasks();
       const run = owned(userId, runId);
       if (isTerminal(run.status) || !run.taskId) return view(run);
       // 409: the task already ended; the watcher settles it.
-      await api.stop(run.taskId).catch((error: unknown) => {
+      await tasks().stop(run.taskId).catch((error: unknown) => {
         if (statusOf(error) !== 409) throw error;
       });
       ledger.progress(runId, 'cancelling');

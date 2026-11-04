@@ -1,16 +1,8 @@
 /* branded-assistant only. Shared tokens and components live in client/theme.css. */
 
-@media (min-width: 900px) {
-  .split.workspace {
-    grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
-    align-items: start;
-  }
-}
 @media (max-width: 899px) {
   .has-run > :last-child { order: -1; } /* on phones the run comes first */
 }
-.credits { font-weight: 600; color: var(--ink-muted); }
-.credits .num, .label, legend { color: var(--ink); font-weight: 600; }
 
 .persona { display: flex; align-items: center; gap: var(--s-3); }
 .avatar {
@@ -18,35 +10,28 @@
   background: var(--accent); color: var(--accent-ink); font: 600 var(--t-4) var(--font);
 }
 
-.presets { display: grid; gap: var(--s-2); margin: 0; padding: 0; border: 0; }
-.presets legend { padding: 0; margin-bottom: var(--s-2); }
+.presets { display: grid; gap: var(--s-2); }
+.presets legend { margin-bottom: var(--s-2); padding: 0; font-weight: 600; }
 .card.preset { display: flex; gap: var(--s-3); padding: var(--s-3) var(--s-4); cursor: pointer; }
 .preset strong, .preset .small { display: block; }
 .preset input { margin: 5px 0 0; accent-color: var(--accent); }
 .preset:has(:checked) { border-color: var(--accent); }
 .preset:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.stack-tight { display: grid; gap: var(--s-2); }
-.field {
-  width: 100%; padding: var(--s-2) var(--s-3); resize: vertical;
-  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
-  color: var(--ink); font: inherit;
-}
-.field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .note { display: flex; gap: var(--s-2); }
 .note .btn { height: auto; }
 
 .run-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
 .asked, .reply { white-space: pre-wrap; overflow-wrap: anywhere; }
 .asked { font-size: var(--t-3); }
-.reply { margin: 0; padding: var(--s-3) var(--s-4); border-radius: var(--radius); }
+.reply { padding: var(--s-3) var(--s-4); border-radius: var(--radius); }
 .reply, .raw { background: var(--bg); }
 .activity {
-  display: grid; gap: var(--s-1); margin: 0; padding: 0 0 0 var(--s-3); list-style: none;
+  display: grid; gap: var(--s-1); padding-left: var(--s-3); list-style: none;
   border-left: 2px solid var(--line); font-size: var(--t-1);
 }
 .activity .status { color: var(--ink-muted); }
-.how { display: grid; gap: var(--s-2); margin: 0; padding-left: 1.25em; }
+.how { display: grid; gap: var(--s-2); padding-left: 1.25em; }
 
 .rows { display: grid; gap: var(--s-3); }
 .rows div { display: grid; grid-template-columns: 120px 1fr; gap: var(--s-3); }
@@ -57,6 +42,6 @@
 }
 summary { cursor: pointer; }
 .raw {
-  max-height: 240px; overflow: auto; margin: var(--s-2) 0 0; padding: var(--s-3);
+  max-height: 240px; overflow: auto; margin-top: var(--s-2); padding: var(--s-3);
   border-radius: var(--radius); font-size: var(--t-1); white-space: pre-wrap;
 }

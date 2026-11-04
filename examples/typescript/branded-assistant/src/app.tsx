@@ -1,18 +1,26 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { isTerminal, type RunStatus, type RunView, type SessionView } from '@/shared/contracts';
+import {
+  isTerminal, type Result, type RunStatus, type RunView, type SessionView,
+} from '@/shared/contracts';
 import { brand } from './client/brand';
-import { AppShell } from './client/components/app-shell';
-import type { Tone } from './client/components/phone-frame';
-import { useAssistant } from './client/use-assistant';
+import { AppShell, Notice, type Tone } from './client/components/app-shell';
+import { useAssistant, type AssistantNotice } from './client/use-assistant';
 
 /** Pill text and tone per status. A failed run is no alarm: often the assistant declined. */
-const STATUS: Record<RunStatus, [label: string, tone: Tone]> = {
-  starting: ['Starting', 'busy'], running: ['In progress', 'busy'], unknown: ['Checking', 'busy'],
-  cancelling: ['Stopping', 'busy'], completed: ['Done', 'live'], cancelled: ['Stopped', 'neutral'],
-  failed: ["Couldn't finish", 'neutral'],
+const STATUS: Record<RunStatus, { pill: string; tone: Tone }> = {
+  starting: { pill: 'Starting', tone: 'busy' },
+  running: { pill: 'In progress', tone: 'busy' },
+  unknown: { pill: 'Checking', tone: 'busy' },
+  cancelling: { pill: 'Stopping', tone: 'busy' },
+  completed: { pill: 'Done', tone: 'live' },
+  cancelled: { pill: 'Stopped', tone: 'neutral' },
+  failed: { pill: "Couldn't finish", tone: 'neutral' },
 };
+/** Statuses in which the assistant works and takes notes. */
+const WORKING: ReadonlyArray<RunStatus> = ['starting', 'running', 'cancelling'];
 const NOTHING_CHANGED = 'Nothing was booked or changed.';
-type Props = ReturnType<typeof useAssistant> & { session: SessionView };
+
+type Send = (text: string) => Promise<boolean>;
 
 /** m:ss since `from`, ticking on its own. */
 function Clock({ from }: { from: string }) {
@@ -26,11 +34,8 @@ function Clock({ from }: { from: string }) {
   return <span className="num">{text}</span>;
 }
 
-const Alert = ({ text, tone = 'danger' }: { text?: string | false | null; tone?: string }) =>
-  text ? <p className="notice" data-tone={tone} role="alert">{text}</p> : null;
-
 /** A text box that keeps its text when sending failed. */
-function useTextForm(send: (text: string) => Promise<boolean>) {
+function useTextForm(send: Send) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const submit = async (event: FormEvent) => {
@@ -43,8 +48,14 @@ function useTextForm(send: (text: string) => Promise<boolean>) {
   return { text, sending, submit, empty: !text.trim(), onChange: setText };
 }
 
-function RequestPanel({ session, start, notice }: Props) {
-  const { persona, presets, run } = session;
+type RequestPanelProps = {
+  session: SessionView;
+  error?: string;
+  start: (presetId: string, text: string) => Promise<boolean>;
+};
+
+function RequestPanel({ session, error, start }: RequestPanelProps) {
+  const { persona, presets, run, reservePerRun } = session;
   const [presetId, setPresetId] = useState(presets[0]?.id ?? '');
   const form = useTextForm((text) => start(presetId, text));
   const busy = form.sending || (run !== null && !isTerminal(run.status));
@@ -70,10 +81,10 @@ function RequestPanel({ session, start, notice }: Props) {
           </label>
         ))}
       </fieldset>
-      <label className="stack-tight">
-        <span className="label">Your request</span>
+      <label className="field">
+        Your request
         <textarea
-          className="field"
+          className="input"
           rows={3}
           maxLength={2_000}
           value={form.text}
@@ -81,7 +92,7 @@ function RequestPanel({ session, start, notice }: Props) {
           onChange={(event) => form.onChange(event.target.value)}
         />
       </label>
-      <Alert text={notice?.at === 'start' && notice.text} />
+      {error && <Notice text={error} />}
       <div className="actions">
         <button className="btn btn-primary" disabled={busy || form.empty}>
           Ask {persona.name}
@@ -90,158 +101,199 @@ function RequestPanel({ session, start, notice }: Props) {
       <p className="small">
         {busy
           ? `${persona.name} is on it. You can ask again when this one is done.`
-          : `A request holds ${session.reservePerRun} credits until done. You pay what it uses.`}
+          : `A request holds ${reservePerRun} credits until done. You pay what it uses.`}
       </p>
     </form>
   );
 }
 
-/** A finished run: the result card, or the assistant's own words, or what happened. */
-function Outcome({ run, title, name }: { run: RunView; title: string; name: string }) {
-  if (run.result) {
-    const { rows, missing } = run.result;
-    return (
-      <section className="card stack" aria-label="Result">
-        <h2>{title}</h2>
-        {rows.length === 0 && <p className="muted">I could not find this one.</p>}
-        <dl className="rows">
-          {rows.map(({ label, value }) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>
-                {Array.isArray(value) ? (
-                  <ul>{value.map((item) => <li key={item}>{item}</li>)}</ul>
-                ) : value}
-              </dd>
-            </div>
+/** Before the first request: what the assistant does. */
+export function Welcome({ name }: { name: string }) {
+  return (
+    <section className="card stack">
+      <h2>{brand.tagline}</h2>
+      <ol className="how">
+        <li>Pick what you need and describe it.</li>
+        <li>{name} looks it up on a real phone. Add a note at any time.</li>
+        <li>The answer shows up here.</li>
+      </ol>
+      <p className="small">{name} only researches: nothing is booked or paid.</p>
+    </section>
+  );
+}
+
+type RunPanelProps = {
+  run: RunView;
+  /** The assistant's name and the preset's label. */
+  name: string;
+  title: string;
+  error?: string;
+  sendNote: Send;
+  stop: () => Promise<boolean>;
+};
+
+/** The run while it works: status, request, activity, and the note box. */
+function RunCard({ run, title, error, sendNote, stop }: RunPanelProps) {
+  const note = useTextForm(sendNote);
+  const { pill, tone } = STATUS[run.status];
+  const working = WORKING.includes(run.status);
+  const doing = run.status === 'cancelling' ? 'Stopping… ' : 'Working… ';
+  const steps = run.steps ? ` · Step ${run.steps}` : '';
+  const used = run.charged === null ? '' : `Used ${run.charged} credits`;
+  return (
+    <section className="card stack">
+      <div className="run-head">
+        <span className="pill" data-tone={tone}>{pill}</span>
+        <span className="small">
+          {working ? <>{doing}<Clock from={run.createdAt} />{steps}</> : used}
+        </span>
+      </div>
+      <div>
+        <p className="small">{title}</p>
+        <p className="asked">{run.request}</p>
+      </div>
+      {working && <div className="progress" role="progressbar" aria-label="Working on it" />}
+      {run.error && <Notice tone="warn" text={run.error} />}
+      {run.timeline.length > 0 && (
+        <ol className="activity" aria-label="Activity">
+          {run.timeline.map(({ kind, text }, index) => (
+            <li key={index} className={kind}>{kind === 'user' ? `You: ${text}` : text}</li>
           ))}
-        </dl>
-        {rows.length > 0 && missing.length > 0 && (
-          <p className="small">{`Not found: ${missing.join(', ')}`}</p>
-        )}
-      </section>
-    );
-  }
-  if (run.status === 'cancelled') return <p className="muted">{run.message ?? NOTHING_CHANGED}</p>;
-  if (run.status === 'completed') {
-    return (
-      <details>
-        <summary className="muted">The result could not be read.</summary>
-        <pre className="raw">{run.rawOutput ?? 'Nothing came back.'}</pre>
-      </details>
-    );
-  }
-  // A failed task may still carry the assistant's words, for example when it declined.
-  const words = [run.message, run.rawOutput].filter((text): text is string => Boolean(text));
+        </ol>
+      )}
+      {working && (
+        <form className="note" onSubmit={note.submit}>
+          <input
+            className="input"
+            value={note.text}
+            maxLength={1_000}
+            placeholder="Add a note, e.g. under €100 a night"
+            aria-label="Add a note"
+            onChange={(event) => note.onChange(event.target.value)}
+          />
+          <button className="btn" disabled={note.sending || note.empty}>Send</button>
+        </form>
+      )}
+      {error && <Notice text={error} />}
+      {working && (
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={run.status === 'cancelling'}
+            onClick={stop}
+          >
+            Stop
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ResultRows({ rows, missing }: Result) {
+  if (rows.length === 0) return <p className="muted">I could not find this one.</p>;
   return (
     <>
-      <p className="muted">{name} couldn't do this one.</p>
-      {words.map((text) => <blockquote key={text} className="reply">{text}</blockquote>)}
-      {words.length === 0 && <p className="muted">{NOTHING_CHANGED}</p>}
+      <dl className="rows">
+        {rows.map(({ label, value }) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>
+              {Array.isArray(value) ? (
+                <ul>{value.map((item) => <li key={item}>{item}</li>)}</ul>
+              ) : value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {missing.length > 0 && <p className="small">{`Not found: ${missing.join(', ')}`}</p>}
     </>
   );
 }
 
-export function RunPanel({ session, notice, sendNote, stop }: Props) {
-  const { run, persona, presets } = session;
-  const note = useTextForm(sendNote);
-  if (!run) {
-    return (
-      <section className="card stack">
-        <h2>{brand.tagline}</h2>
-        <ol className="how">
-          <li>Pick what you need and describe it.</li>
-          <li>{persona.name} looks it up on a real phone. Add a note at any time.</li>
-          <li>The answer shows up here.</li>
-        </ol>
-        <p className="small">{persona.name} only researches: nothing is booked or paid.</p>
-      </section>
-    );
-  }
-  const [label, tone] = STATUS[run.status];
-  const working = ['starting', 'running', 'cancelling'].includes(run.status);
-  const canTalk = !isTerminal(run.status) && run.status !== 'unknown';
-  const title = presets.find((preset) => preset.id === run.presetId)?.label ?? 'Result';
-  const outcome = isTerminal(run.status) && <Outcome run={run} title={title} name={persona.name} />;
+/** A finished run, once: what happened, the assistant's own words, and the result. */
+function Outcome({ run, title, name }: Pick<RunPanelProps, 'run' | 'title' | 'name'>) {
+  const { status, result, rawOutput, message } = run;
+  // A failed task may still carry the assistant's words, for example when it declined.
+  const said = status === 'failed' && !result ? [message, rawOutput] : [];
+  const words = said.filter((text): text is string => Boolean(text));
+  return (
+    <section className="card stack" aria-label="Result">
+      <h2>{title}</h2>
+      {status === 'failed' && !result && (
+        <p className="muted">{`${name} couldn't do this one.`}</p>
+      )}
+      {words.map((text) => <blockquote key={text} className="reply">{text}</blockquote>)}
+      {status === 'cancelled' && <p className="muted">{message ?? NOTHING_CHANGED}</p>}
+      {result ? (
+        <ResultRows {...result} />
+      ) : status === 'completed' ? (
+        <details>
+          <summary className="muted">The result could not be read.</summary>
+          <pre className="raw">{rawOutput ?? 'Nothing came back.'}</pre>
+        </details>
+      ) : (
+        status === 'failed' && words.length === 0 && <p className="muted">{NOTHING_CHANGED}</p>
+      )}
+    </section>
+  );
+}
+
+/** The latest run: its card, and its outcome once it ended. */
+export function RunPanel(props: RunPanelProps) {
+  const { run, title, name } = props;
   return (
     <div className="stack" aria-live="polite">
-      <section className="card stack">
-        <div className="run-head">
-          <span className="pill" data-tone={tone}>{label}</span>
-          <span className="small">
-            {working && (run.status === 'cancelling' ? 'Stopping… ' : 'Working… ')}
-            {working && <Clock from={run.createdAt} />}
-            {working && run.steps ? ` · Step ${run.steps}` : ''}
-            {run.charged !== null && `Used ${run.charged} credits`}
-          </span>
-        </div>
-        <div>
-          <p className="small">{title}</p>
-          <p className="asked">{run.request}</p>
-        </div>
-        {working && <div className="progress" role="progressbar" aria-label="Working on it" />}
-        <Alert text={run.error} tone="warn" />
-        {run.timeline.length > 0 && (
-          <ol className="activity" aria-label="Activity">
-            {run.timeline.map(({ kind, text }, index) => (
-              <li key={index} className={kind}>{kind === 'user' ? `You: ${text}` : text}</li>
-            ))}
-          </ol>
-        )}
-        {canTalk && (
-          <form className="note" onSubmit={note.submit}>
-            <input
-              className="field"
-              value={note.text}
-              maxLength={1_000}
-              placeholder="Add a note, e.g. under €100 a night"
-              aria-label="Add a note"
-              onChange={(event) => note.onChange(event.target.value)}
-            />
-            <button className="btn" disabled={note.sending || note.empty}>Send</button>
-          </form>
-        )}
-        <Alert text={notice?.at === 'run' && notice.text} />
-        {canTalk && (
-          <div className="actions">
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={run.status === 'cancelling'}
-              onClick={stop}
-            >
-              Stop
-            </button>
-          </div>
-        )}
-        {!run.result && outcome}
-      </section>
-      {run.result && outcome}
+      <RunCard {...props} />
+      {isTerminal(run.status) && <Outcome run={run} title={title} name={name} />}
     </div>
   );
 }
 
 export function App() {
-  const state = useAssistant();
-  const { session, loadFailed, reload } = state;
-  const credits = session && (
-    <span className="credits"><span className="num">{session.balance}</span> credits</span>
+  const assistant = useAssistant();
+  const { session, notice } = assistant;
+  const errorAt = (at: AssistantNotice['at']) => (notice?.at === at ? notice.text : undefined);
+  if (!session) {
+    return (
+      <AppShell>
+        {assistant.loadFailed ? (
+          <div className="stack">
+            <Notice text="We could not load your assistant." />
+            <div className="actions">
+              <button className="btn" onClick={assistant.reload}>Try again</button>
+            </div>
+          </div>
+        ) : (
+          <div className="progress" role="progressbar" aria-label="Loading" />
+        )}
+      </AppShell>
+    );
+  }
+
+  const { persona, presets, run, balance } = session;
+  const title = presets.find((preset) => preset.id === run?.presetId)?.label ?? 'Result';
+  const credits = (
+    <span className="topbar-meta"><span className="num">{balance}</span> credits</span>
   );
   return (
-    <AppShell product={brand.product} right={credits}>
-      {session ? (
-        <div className={session.run ? 'split workspace has-run' : 'split workspace'}>
-          <RequestPanel {...state} session={session} />
-          <RunPanel {...state} session={session} />
-        </div>
-      ) : loadFailed ? (
-        <div className="stack">
-          <Alert text="We could not load your assistant." />
-          <div className="actions"><button className="btn" onClick={reload}>Try again</button></div>
-        </div>
-      ) : (
-        <div className="progress" role="progressbar" aria-label="Loading" />
-      )}
+    <AppShell right={credits}>
+      <div className={run ? 'split split-fill has-run' : 'split split-fill'}>
+        <RequestPanel session={session} error={errorAt('start')} start={assistant.start} />
+        {run ? (
+          <RunPanel
+            run={run}
+            name={persona.name}
+            title={title}
+            error={errorAt('run')}
+            sendNote={assistant.sendNote}
+            stop={assistant.stop}
+          />
+        ) : (
+          <Welcome name={persona.name} />
+        )}
+      </div>
     </AppShell>
   );
 }

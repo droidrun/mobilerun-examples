@@ -1,25 +1,21 @@
 import { expect, test } from 'bun:test';
 import { renderToString } from 'react-dom/server';
 import type { RunView } from '@/shared/contracts';
-import { RunPanel } from './app';
+import { RunPanel, Welcome } from './app';
 
 const RUN: RunView = {
   id: 'run-1', presetId: 'cheapest-hotel', request: 'Lisbon, 12–15 May', status: 'failed',
   steps: null, timeline: [], result: null, rawOutput: null, message: null, error: null,
   charged: 3, balance: 97, createdAt: new Date().toISOString(),
 };
-const persona = { name: 'Wren', role: 'Trip concierge' };
-const presets = [{ id: 'cheapest-hotel', label: 'Cheapest hotel', hint: '' }];
 const unused = async () => true;
 
-const render = (run: Partial<RunView> | null) =>
+const render = (run: Partial<RunView>) =>
   renderToString(
     <RunPanel
-      session={{ persona, presets, balance: 97, reservePerRun: 20, run: run && { ...RUN, ...run } }}
-      loadFailed={false}
-      notice={undefined}
-      reload={async () => {}}
-      start={unused}
+      run={{ ...RUN, ...run }}
+      name="Wren"
+      title="Cheapest hotel"
       sendNote={unused}
       stop={unused}
     />,
@@ -47,5 +43,5 @@ test("a failed run reads as the assistant's own words; without words nothing was
   expect(html).toContain('<blockquote class="reply">I only help with travel.</blockquote>');
   expect(html).toContain('&quot;Sorry.&quot;');
   expect(render({})).toContain('Nothing was booked or changed.');
-  expect(render(null)).toContain('The answer shows up here.');
+  expect(renderToString(<Welcome name="Wren" />)).toContain('The answer shows up here.');
 });

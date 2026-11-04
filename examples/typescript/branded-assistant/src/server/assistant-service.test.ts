@@ -32,7 +32,11 @@ function fakeTasks() {
   const tasks = new Map<string, Task>();
   const calls = { run: [] as Array<[Record<string, unknown>, unknown]>, notes: [] as Array<string>,
     stops: [] as Array<string> };
-  const control = { startError: null as Error | null, statusError: null as Error | null, sent: true };
+  const control = {
+    startError: null as Error | null,
+    statusError: null as Error | null,
+    sent: true,
+  };
   const get = async (id: string) => tasks.get(id) ?? Promise.reject(apiError(404));
   const client = {
     tasks: {
@@ -107,7 +111,7 @@ describe('starting a run', () => {
     }
   });
 
-  test('refuses short balances, a second active run, busy phones and a missing key', async () => {
+  test('refuses short balances, a second active run and busy phones', async () => {
     await expect(setup({ balance: 5 }).start()).rejects.toMatchObject(refused(402, 'insufficient_credits'));
 
     const two = setup({ phones: [PHONE_A, PHONE_B] });
@@ -120,8 +124,6 @@ describe('starting a run', () => {
     await h.start();
     await expect(h.start('user-2')).rejects.toMatchObject(refused(409, 'device_busy'));
     expect(h.service.session('user-2').balance).toBe(100);
-    const offline = h.make(null).start('user-3', 'cheapest-hotel', 'x');
-    await expect(offline).rejects.toMatchObject(refused(503, 'missing_api_key'));
   });
 
   test('a definite 4xx refunds, frees the phone and passes the API error on', async () => {

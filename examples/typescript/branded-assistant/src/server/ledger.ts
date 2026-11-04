@@ -36,10 +36,10 @@ type Row = Omit<RunRecord, 'output' | 'timeline'> &
 const RUN = `SELECT id, user_id AS userId, task_id AS taskId, device_id AS deviceId, reserved,
   settled AS charged, status, preset_id AS presetId, request, output, message, steps,
   timeline, created_at AS createdAt FROM runs`;
+const fromJson = (text: string | null) => (text === null ? null : JSON.parse(text));
+const toJson = (value: unknown) => JSON.stringify(value ?? null);
 const record = (row: Row | null): RunRecord | null =>
-  row && { ...row, output: parse(row.output), timeline: parse(row.timeline) };
-const parse = (text: string | null) => (text === null ? null : JSON.parse(text));
-const json = (value: unknown) => JSON.stringify(value ?? null);
+  row && { ...row, output: fromJson(row.output), timeline: fromJson(row.timeline) };
 
 export function createLedger(path: string, startingBalance: number) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -96,7 +96,7 @@ export function createLedger(path: string, startingBalance: number) {
     const used = s.creditsUsed === null ? run.reserved : Math.max(Math.ceil(s.creditsUsed), 0);
     const charged = Math.min(used, run.reserved);
     const { status, output, message = null, steps = null, timeline } = s;
-    finish.run(runId, charged, status, json(output), message, steps, json(timeline));
+    finish.run(runId, charged, status, toJson(output), message, steps, toJson(timeline));
     if (charged < run.reserved) credit.run(run.userId, run.reserved - charged);
     return true;
   });

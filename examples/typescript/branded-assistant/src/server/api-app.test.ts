@@ -86,19 +86,24 @@ describe('runs', () => {
     expect((await browser(setup({ balance: 0 }).app)('/api/runs', START)).status).toBe(402);
   });
 
-  test('passes API errors on with their status; hides unexpected ones behind a 500', async () => {
+  test('passes API 4xx text on; a 5xx becomes a plain 502, anything else a plain 500', async () => {
     const { app, tasks } = setup();
     spyOn(console, 'error').mockImplementation(() => {});
-    const unavailable = Object.assign(new Error('Device type unavailable'), { status: 422 });
-    tasks.run.mockImplementation(() => Promise.reject(unavailable));
-    const upstream = await answer(await browser(app)('/api/runs', START));
-    expect(upstream).toEqual([422, { error: 'upstream_error', message: 'Device type unavailable' }]);
+    const message = 'Device type unavailable';
+    const apiError = (status: number) =>
+      Object.assign(new Error(String(status)), { status, error: { message } });
+    tasks.run.mockImplementation(() => Promise.reject(apiError(422)));
+    const rejected = await answer(await browser(app)('/api/runs', START));
+    expect(rejected).toEqual([422, { error: 'upstream_rejected', message }]);
 
     tasks.run.mockImplementation(async () => ({ id: 'task-2' }));
-    tasks.sendMessage.mockImplementation(() => Promise.reject(new TypeError('password is hunter2')));
     const call = browser(app);
     const run = (await (await call('/api/runs', START)).json()) as { id: string };
-    const failed = await call(`/api/runs/${run.id}/messages`, { message: 'hi' });
+    const note = () => call(`/api/runs/${run.id}/messages`, { message: 'hi' });
+    tasks.sendMessage.mockImplementation(() => Promise.reject(apiError(503)));
+    expect(await answer(await note())).toEqual([502, error('upstream_error')]);
+    tasks.sendMessage.mockImplementation(() => Promise.reject(new TypeError('password is hunter2')));
+    const failed = await note();
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain('hunter2');
   });
