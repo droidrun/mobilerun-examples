@@ -33,9 +33,12 @@ session lifecycle when adapting it.
 
 ## Required boundaries
 
-- Use `deviceType: 'android_cloud_phone'` only. Render API errors (unavailable
-  device type, insufficient balance) as the API returns them; add no
-  client-side gates for quotas or capabilities.
+- Use `deviceType: 'android_cloud_phone'` only. Keep the API's HTTP status for
+  its errors (unavailable device type, insufficient balance) but show visitors a
+  plain message, not upstream text; say "busy" only for the example's own
+  capacity and rate limits. Add no client-side gates for quotas or capabilities.
+- Start the app before enabling kiosk: lock-task mode needs a running task of
+  the package.
 - The browser receives `streamUrl` and `streamToken` only for the session its
   signed visitor cookie owns. Everyone else gets a 404.
 - Every demo has a TTL, a reaper that terminates expired sessions, a cap on

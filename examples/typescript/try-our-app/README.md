@@ -16,8 +16,8 @@ browser ──same-origin HTTP──▶ Bun + Hono ──@mobilerun/sdk──▶
 
 - creating a phone per visitor with `devices.create({ deviceType: 'android_cloud_phone' })`
   and waiting for it with `devices.waitReady()`;
-- locking it to one app with `devices.kiosk.enable()` and launching that app with
-  `devices.apps.start()`;
+- launching one app with `devices.apps.start()` and then locking the phone to it
+  with `devices.kiosk.enable()`;
 - handing the browser only `streamUrl` and `streamToken`, and only to the
   visitor who started that session;
 - ending the demo early or on a timer with `devices.terminate()`, and cleaning up
@@ -59,9 +59,11 @@ binds to `127.0.0.1` only.
 
 1. `POST /api/sessions`: the server reads or sets a signed, anonymous visitor
    cookie, applies the rate limit (keyed by IP address and cookie) and the
-   concurrency cap, creates the phone, waits until it is ready, locks it to
-   `DEMO_APP_PACKAGE`, starts that app, and returns the session id and
-   `expiresInSeconds`.
+   concurrency cap, creates the phone, waits until it is ready, starts
+   `DEMO_APP_PACKAGE`, locks the phone to it, and returns the session id and
+   `expiresInSeconds`. Kiosk mode needs the app running first, which the example
+   does for you: it starts the app, then enables kiosk (retrying briefly while
+   the API reports that the app's task is not there yet).
    A visitor who already has a running demo gets that one back instead of a
    second phone.
 2. `GET /api/sessions/:id/stream`: only for the cookie that owns the session.
@@ -83,7 +85,10 @@ binds to `127.0.0.1` only.
    starts with `demo-` (`devices.list({ search: 'demo-' })`, or the dashboard)
    and terminating the ones you do not recognize.
 5. API errors (for example an unavailable device type or insufficient balance)
-   are returned with the API's own status and message. The browser adds no
+   keep the API's own HTTP status; the server logs the details and sends the
+   browser a plain message, so visitors never read upstream text. The page
+   says the phones are busy only for this example's own limits (concurrency cap,
+   rate limit) and otherwise asks the visitor to try again. The browser adds no
    gates of its own.
 
 ### Layout
