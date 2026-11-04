@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type Mobilerun from '@mobilerun/sdk';
+import { APIConnectionError, APIConnectionTimeoutError } from '@mobilerun/sdk';
 import { createApiApp } from './api-app';
 import { createPortalService } from './portal-service';
 import { createPortalStore, type PortalStore } from './store';
@@ -222,7 +223,7 @@ describe('device lifecycle', () => {
     expect(sdk.live.size).toBe(1);
   });
 
-  test('passes API 4xx text through, but not a rejected portal key or a 5xx', async () => {
+  test('API 4xx text passes through; a rejected key, a 5xx or no connection is a 502', async () => {
     const { call, signIn } = setup();
     const cookie = await signIn('alice@example.com');
     sdk.createFailure = upstream(422, { message: 'Device type unavailable.' });
@@ -240,6 +241,12 @@ describe('device lifecycle', () => {
       const hidden = await call('POST', '/api/device', cookie);
       expect(hidden.status).toBe(502);
       expect((await hidden.json()).message).not.toContain('bad key');
+    }
+    for (const failure of [new APIConnectionError({}), new APIConnectionTimeoutError()]) {
+      sdk.createFailure = failure;
+      const unreachable = await call('POST', '/api/device', cookie);
+      const body = await unreachable.json();
+      expect([unreachable.status, body.error]).toEqual([502, 'upstream_error']);
     }
     expect(store.deviceId(1)).toBeUndefined();
   });

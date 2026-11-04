@@ -76,8 +76,9 @@ With `SESSION_SECRET` empty, sessions reset whenever the server restarts.
   and after every reconnect, and retries with backoff.
 - **Errors**: `src/server/api-app.ts` maps every failure to JSON. An API 4xx
   (an unavailable device type, an insufficient balance) keeps its status and
-  text; a `401`/`403` (your key, not the user's session) or a 5xx becomes a
-  plain `502`. Writes are checked by `hono/csrf`.
+  text; a `401`/`403` (your key, not the user's session), a 5xx, or an API
+  that cannot be reached (connection error, timeout) becomes a plain `502`.
+  Writes are checked by `hono/csrf`.
 - **Brand**: `brand.json` (company, product, tagline, accent, 24×24 logo path)
   re-themes the page. `src/client/theme.css`, `brand.ts` and `components/` are
   shared verbatim with the other white-label examples; this page's own styles

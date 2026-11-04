@@ -55,10 +55,10 @@ adapting it.
   per-end-user keys, no metadata or tags on devices, and no per-end-user
   billing. Ownership, quotas, and charging belong in your own server and DB.
 - Pass Mobilerun 4xx errors on with their status and text, and turn a `401`,
-  `403` or 5xx into a plain `502`; never map an upstream `401`/`403` to the end
-  user's session. Do not add client-side gates for quotas, capabilities, or
-  balance. Do not show upstream state text; label states in your own words.
-  Keep `hono/csrf` on `/api/*`.
+  `403`, a 5xx, or a connection error or timeout into a plain `502`; never map
+  an upstream `401`/`403` to the end user's session. Do not add client-side
+  gates for quotas, capabilities, or balance. Do not show upstream state text;
+  label states in your own words. Keep `hono/csrf` on `/api/*`.
 - Let the server decide whether a device can stream: the browser asks, retries
   with backoff, and asks again on reconnect, dropping answers that arrive after
   sign-out or a state change. Poll device state one request at a time and keep
