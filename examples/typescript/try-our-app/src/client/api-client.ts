@@ -21,6 +21,20 @@ export class ApiClientError extends Error {
   }
 }
 
+/** Codes this example's own server uses to say "not now"; their text is ours to show. */
+const OWN_REJECTIONS = new Set(['capacity_reached', 'rate_limited']);
+
+/**
+ * What a visitor reads when a demo could not start. Only the example's own
+ * capacity and rate-limit rejections get their specific text; any other
+ * failure (an API error, a network error) is the same plain sentence.
+ */
+export function startFailureMessage(error: unknown): string {
+  return error instanceof ApiClientError && OWN_REJECTIONS.has(error.code)
+    ? error.message
+    : 'We could not start the demo. Please try again.';
+}
+
 async function request<T>(
   path: string,
   schema: z.ZodType<T>,

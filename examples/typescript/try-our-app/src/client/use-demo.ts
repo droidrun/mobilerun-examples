@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { demoApi } from './api-client';
+import { demoApi, startFailureMessage } from './api-client';
 import {
   INITIAL_DEMO_STATE,
   demoReducer,
   type DemoState,
 } from './demo-machine';
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const GENERIC_FAILURE = 'Something went wrong. Please try again.';
 
 export function useDemo() {
   const [state, dispatch] = useReducer(demoReducer, INITIAL_DEMO_STATE);
@@ -22,9 +20,9 @@ export function useDemo() {
       .then((health) =>
         dispatch({ type: 'configured', sdkConfigured: health.sdkConfigured }),
       )
-      .catch((error: unknown) => {
+      .catch(() => {
         if (controller.signal.aborted) return;
-        dispatch({ type: 'failed', message: messageOf(error) });
+        dispatch({ type: 'failed', message: GENERIC_FAILURE });
       });
     return () => controller.abort();
   }, []);
@@ -53,7 +51,7 @@ export function useDemo() {
       dispatch({ type: 'stream', stream: await demoApi.stream(session.id) });
     } catch (error) {
       if (sessionId) void demoApi.end(sessionId).catch(() => {});
-      dispatch({ type: 'failed', message: messageOf(error) });
+      dispatch({ type: 'failed', message: startFailureMessage(error) });
     }
   }, []);
 
@@ -64,8 +62,8 @@ export function useDemo() {
     try {
       await demoApi.end(sessionId);
       dispatch({ type: 'ended' });
-    } catch (error) {
-      dispatch({ type: 'failed', message: messageOf(error) });
+    } catch {
+      dispatch({ type: 'failed', message: GENERIC_FAILURE });
     }
   }, []);
 
