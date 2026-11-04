@@ -1,34 +1,18 @@
-import type { Brand } from '@/shared/contracts';
+// Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical.
+import brandJson from '../../brand.json';
 
-/** Black or white, whichever reads better on the given #rrggbb color. */
-export function readableOn(hex: string): string {
-  const [red = 0, green = 0, blue = 0] = [1, 3, 5].map(
-    (start) => Number.parseInt(hex.slice(start, start + 2), 16) / 255,
-  );
-  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  return luminance > 0.55 ? '#111111' : '#ffffff';
+/** Company, product name, tagline, accent colour and a 24×24 SVG path for the logo mark. */
+export const brand = brandJson;
+
+/** White or near-black text, whichever reads better on a #rrggbb colour. */
+function inkOn(hex: string): string {
+  const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? '#141a16' : '#ffffff';
 }
 
-/**
- * The only two colors a brand picks. `styles.css` derives every variable that
- * `@mobilerun/react` reads (card, border, muted, …) from these.
- */
-export function brandCssVariables(brand: Brand): Record<string, string> {
-  return {
-    '--brand-primary': brand.primary,
-    '--brand-on-primary': readableOn(brand.primary),
-    '--brand-background': brand.background,
-  };
-}
-
-export function applyBrand(brand: Brand, root: HTMLElement): void {
-  for (const [name, value] of Object.entries(brandCssVariables(brand))) {
-    root.style.setProperty(name, value);
-  }
-  document.title = `Try ${brand.name}`;
-}
-
-/** An <img> source keeps the brand's SVG from running as page markup. */
-export function logoDataUri(brand: Brand): string {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(brand.logo)}`;
+/** Sets the two brand variables once, before the first render; theme.css derives the rest. */
+export function applyBrand(root: HTMLElement = document.documentElement): void {
+  if (!/^#[0-9a-f]{6}$/i.test(brand.accent)) throw new Error('brand.json: accent must be #rrggbb');
+  root.style.setProperty('--accent', brand.accent);
+  root.style.setProperty('--accent-ink', inkOn(brand.accent));
 }

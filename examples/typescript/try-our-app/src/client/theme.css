@@ -1,0 +1,147 @@
+/* Shared by the white-label examples (try-our-app, tenant-portal, branded-assistant). Keep identical. */
+
+/* Tokens. Build only from these. --accent and --accent-ink come from brand.json (brand.ts). */
+:root {
+  color-scheme: light dark;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --t-1: 13px; --t-2: 15px; --t-3: 18px; --t-4: 24px; --t-5: 32px;
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px; --s-12: 48px;
+  --radius: 8px; --radius-card: 12px;
+  --bg: #f5f6f4; --surface: #ffffff; --ink: #141a16; --ink-muted: #5b665f; --line: #e1e5e1;
+  --ok: #1d7f45; --warn: #a35c00; --danger: #c03a2b;
+  --accent-text: color-mix(in oklab, var(--accent) 85%, var(--ink));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1311; --surface: #171c19; --ink: #e7ece8; --ink-muted: #98a39c; --line: #26302a;
+    --ok: #5cc486; --warn: #e3a547; --danger: #f07a6c;
+    --accent-text: color-mix(in oklab, var(--accent) 60%, #ffffff);
+  }
+}
+
+/* Base */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 var(--t-2) / 1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, p, ul, dl, dd, figure { margin: 0; padding: 0; }
+h1, h2 { font-weight: 600; text-wrap: balance; }
+h1 { font-size: var(--t-5); line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: var(--t-3); line-height: 1.3; }
+p { max-width: 60ch; }
+a { color: var(--accent-text); }
+.muted { color: var(--ink-muted); }
+.small { font-size: var(--t-1); color: var(--ink-muted); }
+.num { font-variant-numeric: tabular-nums; }
+.stack { display: flex; flex-direction: column; gap: var(--s-4); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--s-3); }
+
+/* Shell: 56px top bar, 1040px content, two columns from 900px. */
+.topbar { height: 56px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.topbar-inner, .content {
+  width: min(1040px, 100%); margin-inline: auto; padding-inline: var(--s-4);
+}
+.topbar-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
+.wordmark { display: flex; align-items: center; gap: var(--s-2); font: 600 var(--t-3) var(--font); }
+.brand-mark { flex: none; fill: var(--accent); }
+.content { padding-block: var(--s-8) var(--s-12); }
+.split { display: grid; gap: var(--s-8); }
+
+@media (min-width: 900px) {
+  .topbar-inner, .content { padding-inline: var(--s-8); }
+  .content { padding-block: var(--s-12); }
+  .split {
+    grid-template-columns: minmax(0, 420px) auto;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+@media (max-width: 899px) {
+  h1 { font-size: var(--t-4); }
+}
+
+/* Card: the one container style. A notice is a slim card with a tone bar. */
+.card, .notice {
+  border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface);
+}
+.card { padding: var(--s-6); }
+.notice { display: flex; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
+.notice::before {
+  content: ""; flex: none; width: 3px; border-radius: 2px; background: var(--tone);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  height: 36px; padding-inline: var(--s-4);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.btn:hover { border-color: var(--ink-muted); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 88%, #000); }
+.btn-danger { color: var(--danger); }
+
+/* Status tone, used by pill and notice. */
+[data-tone] { --tone: var(--ink-muted); }
+[data-tone="live"] { --tone: var(--ok); }
+[data-tone="busy"], [data-tone="warn"] { --tone: var(--warn); }
+[data-tone="danger"] { --tone: var(--danger); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  height: 24px; padding-inline: var(--s-3);
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  font-size: var(--t-1); font-weight: 600;
+}
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
+.pill[data-tone="busy"]::before { animation: pulse 1.2s ease-in-out infinite; }
+
+/* An indeterminate progress line, for waits the server cannot measure. */
+.progress { height: 2px; overflow: hidden; border-radius: 2px; background: var(--line); }
+.progress::after {
+  content: ""; display: block; width: 40%; height: 100%;
+  background: var(--accent); animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse { 50% { opacity: 0.3; } }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) {
+  .pill::before, .progress::after { animation: none; }
+}
+
+/* Phone frame: the only element with depth. The screen is dark in both themes,
+   and the variables @mobilerun/react reads are pinned to it here. */
+.phone-frame { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+.phone {
+  --background: #0b0e0c; --foreground: #e7ece8; --card: #171c19; --border: #26302a;
+  --muted: #1d2420; --muted-foreground: #98a39c;
+  --primary: var(--accent); --primary-foreground: var(--accent-ink); --ring: var(--accent);
+  width: 300px;
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 36px;
+  background: #050706;
+  box-shadow: 0 0 0 1px var(--line), 0 24px 48px -16px rgb(0 0 0 / 0.45);
+}
+.phone-screen {
+  position: relative; aspect-ratio: 9 / 19.5; overflow: hidden;
+  border-radius: 26px 26px 0 0; background: var(--background);
+}
+.phone-empty {
+  position: absolute; inset: 0;
+  display: grid; place-content: center; justify-items: center; gap: var(--s-3);
+  padding: var(--s-6); background: var(--background);
+  color: var(--muted-foreground); font-size: var(--t-1); text-align: center;
+}
+.phone-nav { border-radius: 0 0 26px 26px; color: var(--foreground); transition: opacity 160ms; }
+.phone-nav.is-off { opacity: 0.35; pointer-events: none; }
