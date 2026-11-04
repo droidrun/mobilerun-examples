@@ -1,13 +1,10 @@
 import type { z } from 'zod';
 import {
   apiErrorSchema,
-  brandSchema,
   endSessionResponseSchema,
   healthSchema,
   sessionViewSchema,
   streamViewSchema,
-  type Brand,
-  type Health,
   type SessionView,
   type StreamView,
 } from '@/shared/contracts';
@@ -52,12 +49,8 @@ async function request<T>(
 }
 
 export const demoApi = {
-  health(signal?: AbortSignal): Promise<Health> {
+  health(signal?: AbortSignal) {
     return request('/api/health', healthSchema, { signal });
-  },
-
-  brand(signal?: AbortSignal): Promise<Brand> {
-    return request('/api/brand', brandSchema, { signal });
   },
 
   start(signal?: AbortSignal): Promise<SessionView> {

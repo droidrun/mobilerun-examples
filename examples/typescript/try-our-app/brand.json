@@ -3,16 +3,8 @@
   "tagline": "Plan trips together, wherever you are.",
   "headline": "Try Fernly. Right here.",
   "pitch": "Open the real Fernly app on a live phone in your browser. No download, no sign-up. Your demo ends by itself after a few minutes.",
-  "logoSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"9\" fill=\"#1f7a4d\"/><path d=\"M16 6c-5 4-7 8-6 12 1 3 3 5 6 8 3-3 5-5 6-8 1-4-1-8-6-12z\" fill=\"#f4f1e8\"/><path d=\"M16 12v14\" stroke=\"#1f7a4d\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></svg>",
   "getAppUrl": "https://example.com/get-fernly",
-  "colors": {
-    "primary": "#1f7a4d",
-    "primaryForeground": "#ffffff",
-    "background": "#f4f1e8",
-    "foreground": "#1c2a22",
-    "card": "#fffdf7",
-    "muted": "#e6e1d2",
-    "mutedForeground": "#5b6a60",
-    "border": "#d8d2bf"
-  }
+  "primary": "#1f7a4d",
+  "background": "#f4f1e8",
+  "logo": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"9\" fill=\"#1f7a4d\"/><path d=\"M16 6c-5 4-7 8-6 12 1 3 3 5 6 8 3-3 5-5 6-8 1-4-1-8-6-12z\" fill=\"#f4f1e8\"/><path d=\"M16 12v14\" stroke=\"#1f7a4d\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></svg>"
 }

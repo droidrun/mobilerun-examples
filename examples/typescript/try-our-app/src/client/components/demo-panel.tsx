@@ -1,19 +1,22 @@
-import type { Brand } from '@/shared/contracts';
-import { formatRemaining } from '@/client/format-time';
-import { remainingMs, type DemoState } from '@/client/demo-machine';
+import { isLive, remainingMs, type DemoState } from '@/client/demo-machine';
 import { useNow } from '@/client/use-now';
+import { brand } from '@/shared/brand';
 
 type DemoPanelProps = {
-  brand: Brand;
   state: DemoState;
   onStart: () => void;
   onEnd: () => void;
   onReset: () => void;
 };
 
-export function DemoPanel({ brand, state, onStart, onEnd, onReset }: DemoPanelProps) {
-  const ticking = state.phase === 'live' || state.phase === 'ending';
-  const now = useNow(ticking);
+function formatRemaining(ms: number): string {
+  const totalSeconds = Math.ceil(ms / 1_000);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${Math.floor(totalSeconds / 60)}:${seconds}`;
+}
+
+export function DemoPanel({ state, onStart, onEnd, onReset }: DemoPanelProps) {
+  const now = useNow(isLive(state));
 
   if (state.phase === 'loading') {
     return <p className="status">Loading…</p>;
@@ -35,15 +38,19 @@ export function DemoPanel({ brand, state, onStart, onEnd, onReset }: DemoPanelPr
   }
 
   if (state.phase === 'ended') {
+    // Only an end the server confirmed (the DELETE succeeded) may say the phone
+    // is released; when the countdown ran out, cleanup is the server's job.
     return (
       <>
         <p className="kicker">
-          {state.endReason === 'expired' ? 'Demo time is up' : 'Demo ended'}
+          {state.endedBy === 'expired' ? 'Demo time is up' : 'Demo ended'}
         </p>
         <h1>Like what you saw?</h1>
         <p className="pitch">
-          Get {brand.name} on your own phone and keep going. The demo phone has
-          been wiped and released.
+          {state.endedBy === 'expired'
+            ? 'Your demo time is up. '
+            : 'The demo phone has been released. '}
+          Get {brand.name} on your own phone and keep going.
         </p>
         <div className="actions">
           <a className="button" href={brand.getAppUrl}>
@@ -57,7 +64,7 @@ export function DemoPanel({ brand, state, onStart, onEnd, onReset }: DemoPanelPr
     );
   }
 
-  if (state.phase === 'live' || state.phase === 'ending') {
+  if (isLive(state)) {
     return (
       <>
         <p className="kicker">Live demo</p>

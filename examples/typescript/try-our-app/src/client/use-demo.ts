@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { demoApi } from './api-client';
-import { INITIAL_DEMO_STATE, demoReducer, type DemoState } from './demo-machine';
+import {
+  INITIAL_DEMO_STATE,
+  demoReducer,
+  type DemoState,
+} from './demo-machine';
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -41,7 +45,11 @@ export function useDemo() {
     try {
       const session = await demoApi.start();
       sessionId = session.id;
-      dispatch({ type: 'started', session, receivedAt: Date.now() });
+      dispatch({
+        type: 'started',
+        sessionId: session.id,
+        deadline: Date.now() + session.expiresInSeconds * 1_000,
+      });
       dispatch({ type: 'stream', stream: await demoApi.stream(session.id) });
     } catch (error) {
       if (sessionId) void demoApi.end(sessionId).catch(() => {});

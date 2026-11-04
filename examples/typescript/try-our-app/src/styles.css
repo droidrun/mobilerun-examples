@@ -1,23 +1,39 @@
-/* Colors come from brand.json (applied as CSS variables at runtime).
-   The values below are only the first-paint fallback. */
+/* A brand picks two colors in brand.json; they arrive as --brand-primary,
+   --brand-on-primary and --brand-background. Everything @mobilerun/react reads
+   is derived from them here. The fallbacks below only cover first paint.
+   The derived variables live on body, not :root, so they win over the
+   package's own :root defaults whatever order the two stylesheets load in. */
 :root {
   font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
-  --background: #f4f1e8;
-  --foreground: #1c2a22;
-  --card: #fffdf7;
-  --muted: #e6e1d2;
-  --muted-foreground: #5b6a60;
-  --border: #d8d2bf;
-  --primary: #1f7a4d;
-  --primary-foreground: #ffffff;
+  --brand-primary: #1f7a4d;
+  --brand-on-primary: #ffffff;
+  --brand-background: #f4f1e8;
+}
+
+body {
+  --background: var(--brand-background);
+  --primary: var(--brand-primary);
+  --primary-foreground: var(--brand-on-primary);
+  --foreground: color-mix(in srgb, var(--brand-primary) 20%, #000);
+  --card: color-mix(in srgb, var(--brand-background) 55%, #fff);
+  --card-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--brand-background) 88%, var(--foreground));
+  --muted-foreground: color-mix(in srgb, var(--foreground) 68%, var(--brand-background));
+  --border: color-mix(in srgb, var(--brand-background) 80%, var(--foreground));
+  --accent: var(--muted);
+  --accent-foreground: var(--foreground);
+  --ring: var(--brand-primary);
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
+html {
+  background: var(--brand-background);
+}
+
 body {
   margin: 0;
   min-width: 320px;

@@ -1,7 +1,7 @@
 import { DeviceStream, NavigationBar, StreamStatusPill } from '@mobilerun/react';
 import { useRef, useState } from 'react';
 import type { ComponentRef } from 'react';
-import type { DemoState } from '@/client/demo-machine';
+import { isLive, type DemoState } from '@/client/demo-machine';
 
 type PhoneFrameProps = {
   state: DemoState;
@@ -13,19 +13,15 @@ function placeholder(state: DemoState): string | null {
   switch (state.phase) {
     case 'starting':
       return 'Starting your demo…';
-    case 'live':
-    case 'ending':
-      return state.streamUrl ? null : 'Connecting…';
     default:
-      return null;
+      return isLive(state) && !state.streamUrl ? 'Connecting…' : null;
   }
 }
 
 export function PhoneFrame({ state, logoSrc, onStreamHealed }: PhoneFrameProps) {
   const streamRef = useRef<ComponentRef<typeof DeviceStream>>(null);
   const [connected, setConnected] = useState(false);
-  const showStream =
-    (state.phase === 'live' || state.phase === 'ending') && state.streamUrl;
+  const showStream = isLive(state) && state.streamUrl;
   const pending = placeholder(state);
 
   return (

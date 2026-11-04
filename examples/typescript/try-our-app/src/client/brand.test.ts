@@ -1,24 +1,30 @@
 import { describe, expect, test } from 'bun:test';
+import { brand } from '@/shared/brand';
 import { brandSchema } from '@/shared/contracts';
-import { brandCssVariables, logoDataUri } from './brand';
+import { brandCssVariables, logoDataUri, readableOn } from './brand';
 
-const brand = brandSchema.parse(await Bun.file('brand.json').json());
+describe('brand', () => {
+  test('the bundled brand is valid and rejects unsafe colors', () => {
+    expect(brand.name).toBe('Fernly');
+    expect(
+      brandSchema.safeParse({ ...brand, primary: 'red; background: url(x)' })
+        .success,
+    ).toBe(false);
+  });
 
-describe('brand mapping', () => {
-  test('maps brand colors onto the variables @mobilerun/react reads', () => {
-    const variables = brandCssVariables(brand);
-
-    expect(variables['--primary']).toBe(brand.colors.primary);
-    expect(variables['--primary-foreground']).toBe(brand.colors.primaryForeground);
-    expect(variables['--background']).toBe(brand.colors.background);
-    expect(variables['--card']).toBe(brand.colors.card);
-    expect(variables['--border']).toBe(brand.colors.border);
+  test('exposes the two brand colors and a readable text color', () => {
+    expect(brandCssVariables(brand)).toEqual({
+      '--brand-primary': brand.primary,
+      '--brand-on-primary': '#ffffff',
+      '--brand-background': brand.background,
+    });
+    expect(readableOn('#ffd200')).toBe('#111111');
   });
 
   test('encodes the logo as an image source', () => {
     const uri = logoDataUri(brand);
 
     expect(uri).toStartWith('data:image/svg+xml;utf8,%3Csvg');
-    expect(decodeURIComponent(uri.split(',')[1] ?? '')).toBe(brand.logoSvg);
+    expect(decodeURIComponent(uri.split(',')[1] ?? '')).toBe(brand.logo);
   });
 });

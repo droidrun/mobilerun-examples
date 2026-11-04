@@ -1,16 +1,13 @@
 import { logoDataUri } from './client/brand';
 import { DemoPanel } from './client/components/demo-panel';
 import { PhoneFrame } from './client/components/phone-frame';
-import { useBrand } from './client/use-brand';
 import { useDemo } from './client/use-demo';
+import { brand } from './shared/brand';
+
+const logoSrc = logoDataUri(brand);
 
 export function App() {
-  const brand = useBrand();
   const { state, start, end, refreshStream, reset } = useDemo();
-
-  if (!brand) return <main className="shell" aria-busy="true" />;
-
-  const logoSrc = logoDataUri(brand);
 
   return (
     <main className="shell">
@@ -21,13 +18,7 @@ export function App() {
 
       <section className="stage">
         <div className="copy">
-          <DemoPanel
-            brand={brand}
-            state={state}
-            onStart={start}
-            onEnd={end}
-            onReset={reset}
-          />
+          <DemoPanel state={state} onStart={start} onEnd={end} onReset={reset} />
         </div>
         <PhoneFrame state={state} logoSrc={logoSrc} onStreamHealed={refreshStream} />
       </section>
