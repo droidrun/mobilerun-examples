@@ -7,7 +7,8 @@ authentication, and downloads a referenced workflow file through
 It uses two independent credentials:
 
 1. `WEBHOOK_SECRET` verifies that the exact callback body came from mobilerun.
-2. `MOBILERUN_CLOUD_API_KEY` authenticates the referenced file download.
+2. `MOBILERUN_API_KEY` authenticates the referenced file download. The older name
+   `MOBILERUN_CLOUD_API_KEY` is still accepted as a fallback.
 
 ## Security behavior
 
@@ -75,7 +76,7 @@ Set these values in `.env`:
 
 ```dotenv
 MOBILERUN_BASE_URL=https://api.mobilerun.ai/v1
-MOBILERUN_CLOUD_API_KEY=dr_sk_...
+MOBILERUN_API_KEY=dr_sk_...
 WEBHOOK_PATH=/mobilerun/a-long-random-private-path
 WEBHOOK_SECRET=whsec_...
 DOWNLOAD_DIR=./downloads

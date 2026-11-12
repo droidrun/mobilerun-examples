@@ -55,7 +55,7 @@ class ShowcaseSettingsTests(unittest.TestCase):
             ShowcaseSettings.from_env(
                 {
                     "PUBLIC_URL": "https://showcase.example",
-                    "MOBILERUN_CLOUD_API_KEY": "dr_sk_test",
+                    "MOBILERUN_API_KEY": "dr_sk_test",
                     "SHOWCASE_WEBHOOK_ID": FILE_ID,
                 }
             )
@@ -64,7 +64,7 @@ class ShowcaseSettingsTests(unittest.TestCase):
         result = ShowcaseSettings.from_env(
             {
                 "PUBLIC_URL": "https://showcase.example",
-                "MOBILERUN_CLOUD_API_KEY": "dr_sk_test",
+                "MOBILERUN_API_KEY": "dr_sk_test",
             }
         )
 

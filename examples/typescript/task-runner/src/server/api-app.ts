@@ -26,7 +26,7 @@ function missingApiKeyResponse(): Response {
   return jsonResponse(
     {
       error: 'missing_api_key',
-      message: 'Set MOBILERUN_CLOUD_API_KEY on the server.',
+      message: 'Set MOBILERUN_API_KEY on the server.',
     },
     500,
   );

@@ -45,8 +45,10 @@ cp .env.example .env
 Set the server-side key:
 
 ```dotenv
-MOBILERUN_CLOUD_API_KEY=dr_sk_...
+MOBILERUN_API_KEY=dr_sk_...
 ```
+
+The older name `MOBILERUN_CLOUD_API_KEY` is still accepted as a fallback.
 
 The example always binds to `127.0.0.1`; it cannot accidentally expose its
 unauthenticated task and stream-credential routes to the local network. Put an

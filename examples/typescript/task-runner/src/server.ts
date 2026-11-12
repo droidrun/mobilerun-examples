@@ -22,7 +22,7 @@ const app = createApiApp({ service });
 
 if (!service) {
   console.warn(
-    'MOBILERUN_CLOUD_API_KEY is not set. The UI will load, but tasks cannot start.',
+    'MOBILERUN_API_KEY is not set. The UI will load, but tasks cannot start.',
   );
 }
 

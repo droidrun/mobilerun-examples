@@ -22,7 +22,7 @@ the minimal executable entry point.
    override.
 2. Read the receiver's [`README.md`](../../examples/python/webhook-file-receiver/README.md)
    and [`.env.example`](../../examples/python/webhook-file-receiver/.env.example).
-   Use `MOBILERUN_CLOUD_API_KEY` and `MOBILERUN_BASE_URL` exactly as shown.
+   Use `MOBILERUN_API_KEY` and `MOBILERUN_BASE_URL` exactly as shown.
 3. Configure a long random `WEBHOOK_PATH` and the endpoint's signing secret in
    `WEBHOOK_SECRET`.
 4. For offline work, run the tests and stop there. Do not create or modify a

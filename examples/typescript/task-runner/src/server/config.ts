@@ -22,7 +22,8 @@ export function readServerConfig(
   environment: Record<string, string | undefined>,
 ): ServerConfig {
   return serverConfigSchema.parse({
-    apiKey: environment.MOBILERUN_CLOUD_API_KEY,
+    apiKey:
+      environment.MOBILERUN_API_KEY || environment.MOBILERUN_CLOUD_API_KEY,
     apiUrl: normalizeApiBaseUrl(environment.MOBILERUN_API_URL),
     host: '127.0.0.1',
     port: environment.PORT ?? 3_000,

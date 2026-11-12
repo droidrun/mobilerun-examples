@@ -40,7 +40,9 @@ class Config:
         values = os.environ if env is None else env
         webhook_path = values.get("WEBHOOK_PATH", "")
         secret = values.get("WEBHOOK_SECRET", "")
-        api_key = values.get("MOBILERUN_CLOUD_API_KEY", "")
+        api_key = values.get("MOBILERUN_API_KEY") or values.get(
+            "MOBILERUN_CLOUD_API_KEY", ""
+        )
         api_base_url = values.get(
             "MOBILERUN_BASE_URL", "https://api.mobilerun.ai/v1"
         ).rstrip("/")
@@ -52,7 +54,7 @@ class Config:
         if not secret:
             raise ConfigurationError("WEBHOOK_SECRET is required")
         if not api_key:
-            raise ConfigurationError("MOBILERUN_CLOUD_API_KEY is required")
+            raise ConfigurationError("MOBILERUN_API_KEY is required")
         validate_api_base_url(api_base_url)
 
         age_seconds = positive_int(values, "MAX_TIMESTAMP_AGE_SECONDS", 300)
