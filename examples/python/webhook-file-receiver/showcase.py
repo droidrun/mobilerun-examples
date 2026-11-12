@@ -92,9 +92,11 @@ class ShowcaseSettings:
         if parsed.scheme != "https" or not parsed.netloc:
             raise ValueError("PUBLIC_URL must be an HTTPS origin")
 
-        api_key = values.get("MOBILERUN_CLOUD_API_KEY", "")
+        api_key = values.get("MOBILERUN_API_KEY") or values.get(
+            "MOBILERUN_CLOUD_API_KEY", ""
+        )
         if not api_key:
-            raise ValueError("MOBILERUN_CLOUD_API_KEY is required")
+            raise ValueError("MOBILERUN_API_KEY is required")
 
         trigger_id = values.get("SHOWCASE_TRIGGER_ID") or None
         if trigger_id:

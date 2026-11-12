@@ -37,7 +37,7 @@ describe('API contracts', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       error: 'missing_api_key',
-      message: 'Set MOBILERUN_CLOUD_API_KEY on the server.',
+      message: 'Set MOBILERUN_API_KEY on the server.',
     });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });

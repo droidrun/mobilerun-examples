@@ -18,7 +18,7 @@ task lifecycle when adapting it.
    [`package.json`](../../examples/typescript/task-runner/package.json), and
    [`.env.example`](../../examples/typescript/task-runner/.env.example).
 2. Install `@mobilerun/sdk` and `@mobilerun/react` from npm. Do not add local
-   package overrides. Keep `MOBILERUN_CLOUD_API_KEY` on the server and use
+   package overrides. Keep `MOBILERUN_API_KEY` on the server and use
    `MOBILERUN_API_URL` only to override the default API base.
 3. Keep SDK calls behind a server adapter. Keep validation and public response
    schemas independent from SDK response types.
@@ -33,7 +33,7 @@ task lifecycle when adapting it.
 
 ## Required boundaries
 
-- Never send `MOBILERUN_CLOUD_API_KEY` to the browser or expose raw SDK
+- Never send `MOBILERUN_API_KEY` to the browser or expose raw SDK
   responses through local routes.
 - Accept only the documented public task fields. Keep model selection, output
   schema, credentials, and other privileged or expensive SDK options under
