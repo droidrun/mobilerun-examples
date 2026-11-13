@@ -2,7 +2,7 @@
 
 This web server receives mobilerun webhook events, verifies their HMAC
 authentication, and downloads a referenced workflow file through
-`mobilerun_sdk.Mobilerun`.
+`mobilerun_sdk.MobilerunSDK`.
 
 It uses two independent credentials:
 

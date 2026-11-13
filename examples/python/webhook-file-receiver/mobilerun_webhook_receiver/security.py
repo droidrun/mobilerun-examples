@@ -25,6 +25,7 @@ def verify_signature(
     max_age_ms: int = 300_000,
 ) -> None:
     """Verify timestamp freshness and HMAC over ``timestamp.raw_body``."""
+    # TODO: replace with the SDK `verifyWebhook` helper once it ships.
     try:
         timestamp_ms = int(timestamp)
         timestamp_bytes = timestamp.encode("ascii")

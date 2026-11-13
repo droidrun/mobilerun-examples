@@ -1,4 +1,4 @@
-import Mobilerun from '@mobilerun/sdk';
+import type { MobilerunSDK } from '@mobilerun/sdk';
 import {
   taskStatusSchema,
   type RunTaskRequest,
@@ -20,29 +20,35 @@ const OUTPUT_SCHEMA = {
 
 const LLM_MODEL = 'google/gemini-3.1-flash-lite';
 
-export function createMobilerunTaskDeps(client: Mobilerun): TaskServiceDeps {
+export function createMobilerunTaskDeps(sdk: MobilerunSDK): TaskServiceDeps {
   return {
-    async runTask(input: RunTaskRequest) {
-      const result = await client.tasks.run({
+    async runTask({ deviceId, ...input }: RunTaskRequest) {
+      const task = await sdk.devices.fromId(deviceId).run({
         ...input,
         llmModel: LLM_MODEL,
         outputSchema: OUTPUT_SCHEMA,
       });
       return {
-        id: result.id,
-        status: taskStatusSchema.parse(result.status),
-        streamUrl: result.streamUrl,
+        id: task.id,
+        status: taskStatusSchema.parse(task.status),
+        streamUrl:
+          task.info && 'streamUrl' in task.info
+            ? task.info.streamUrl
+            : undefined,
       };
     },
     async listDevices() {
-      const response = await client.devices.list({
+      const devices = [];
+      for await (const device of sdk.devices.list({
         pageSize: 100,
         state: ['ready', 'assigned'],
-      });
-      return response.items ?? [];
+      })) {
+        if (device.info) devices.push(device.info);
+      }
+      return devices;
     },
     async retrieveTask(taskId) {
-      const response = await client.tasks.retrieve(taskId);
+      const response = await sdk.tasks.fromId(taskId).refresh();
       return {
         task: {
           id: response.task.id,
@@ -58,14 +64,14 @@ export function createMobilerunTaskDeps(client: Mobilerun): TaskServiceDeps {
       };
     },
     async retrieveDevice(deviceId) {
-      const device = await client.devices.retrieve(deviceId);
+      const { info } = await sdk.devices.get(deviceId);
       return {
-        streamUrl: device.streamUrl,
-        streamToken: device.streamToken,
+        streamUrl: info?.streamUrl,
+        streamToken: info?.streamToken,
       };
     },
     stopTask(taskId) {
-      return client.tasks.stop(taskId);
+      return sdk.tasks.fromId(taskId).stop();
     },
   };
 }

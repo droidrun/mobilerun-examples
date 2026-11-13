@@ -13,11 +13,11 @@ browser ──same-origin HTTP──▶ Bun + Hono ──@mobilerun/sdk──▶
 
 ## What it demonstrates
 
-- starting a task with `client.tasks.run()`;
+- starting a task with `device.run()` on a `MobilerunSDK` device handle;
 - listing available devices and selecting one for the task;
 - resolving `streamUrl` and `streamToken` from the selected device;
 - polling a narrow server endpoint for task status and structured output;
-- cancelling a running task with `client.tasks.stop()`;
+- cancelling a running task with `task.stop()`;
 - refreshing stream credentials from the task's device when necessary;
 - expiring and bounding the in-memory stream credential cache;
 - polling without overlapping task-status requests;

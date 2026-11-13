@@ -14,6 +14,7 @@ from support import FILE_ID, config
 class RedirectingSdkClient:
     def __init__(self):
         self.calls = []
+        self.api = self
 
     def get(self, path, **kwargs):
         self.calls.append((path, kwargs))
@@ -55,7 +56,7 @@ class DownloaderTests(unittest.TestCase):
 
             downloader = MobilerunFileDownloader(
                 config(Path(directory)),
-                sdk_client=sdk_client,
+                sdk=sdk_client,
                 storage_client=httpx.Client(
                     transport=httpx.MockTransport(storage_handler)
                 ),
@@ -87,7 +88,7 @@ class DownloaderTests(unittest.TestCase):
 
             downloader = MobilerunFileDownloader(
                 config(Path(directory)),
-                sdk_client=sdk_client,
+                sdk=sdk_client,
                 storage_client=httpx.Client(
                     transport=httpx.MockTransport(storage_handler)
                 ),

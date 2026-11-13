@@ -1,4 +1,4 @@
-import Mobilerun from '@mobilerun/sdk';
+import { MobilerunSDK } from '@mobilerun/sdk';
 import index from '../index.html';
 import { createApiApp } from './server/api-app';
 import { readServerConfig } from './server/config';
@@ -10,7 +10,7 @@ const config = readServerConfig(process.env);
 const service = config.apiKey
   ? createTaskService(
       createMobilerunTaskDeps(
-        new Mobilerun({
+        new MobilerunSDK({
           apiKey: config.apiKey,
           ...(config.apiUrl ? { baseURL: config.apiUrl } : {}),
         }),
