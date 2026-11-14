@@ -60,7 +60,7 @@ class WebhookApplication:
         self,
         headers: Mapping[str, str],
         raw_body: bytes,
-    ) -> Any:
+    ) -> Any | tuple[int, dict[str, Any]]:
         try:
             return verify_webhook(
                 raw_body,

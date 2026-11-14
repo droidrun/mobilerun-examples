@@ -62,7 +62,7 @@ describe('runner state machine', () => {
 
     expect(polled.phase).toBe('active');
     expect(polled.streamUrl).toBe(STARTED_RUN.streamUrl);
-    expect(statusLabel(polled, true)).toBe('Task prepared');
+    expect(statusLabel(polled, true)).toBe('Preparing task');
     expect(runnerReducer(polled, { type: 'cancel-requested' }).phase)
       .toBe('cancelling');
   });

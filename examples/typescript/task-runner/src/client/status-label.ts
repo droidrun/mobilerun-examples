@@ -8,8 +8,8 @@ export function statusLabel(
   if (state.phase === 'cancelling') return 'Stopping task';
   if (state.phase === 'error') return 'Runner error';
   if (state.status === 'queued') return 'Task queued';
-  if (state.status === 'prepared') return 'Task prepared';
-  if (state.status === 'created') return 'Preparing task';
+  if (state.status === 'prepared') return 'Preparing task';
+  if (state.status === 'created') return 'Task created';
   if (state.status === 'cancelling') return 'Stopping task';
   if (state.status === 'completed') return 'Task completed';
   if (state.status === 'failed') return 'Task failed';
