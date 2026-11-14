@@ -221,7 +221,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mobilerun-sdk", specifier = ">=6.2.0,<7" }]
+requires-dist = [{ name = "mobilerun-sdk", specifier = ">=6.2.1,<7" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -232,7 +232,7 @@ dev = [
 
 [[package]]
 name = "mobilerun-sdk"
-version = "6.2.0"
+version = "6.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -242,9 +242,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/c2/0dcc32821d61b85909df8b2074a0ac8cba0052acf56c29d965f29e9c940d/mobilerun_sdk-6.2.0.tar.gz", hash = "sha256:b70c595dcc61657cf17aece7fb95b7e68fb41084f79d334af9b70127f8d44294", size = 474956, upload-time = "2026-11-14T01:33:23.845Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/6a/e1e18ef223839d3c2b493028b8084ae3d025c2ba60e9555311eb71aa1788/mobilerun_sdk-6.2.1.tar.gz", hash = "sha256:3b50ffcb04a66aaf7112c24b68e859025202da736c174c0e88759b36c075d58a", size = 475051, upload-time = "2026-11-14T09:38:02.338Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/53/99f2c675c1f772569e5a22dda3f32541215671cd1b016c7709c9ad896dc3/mobilerun_sdk-6.2.0-py3-none-any.whl", hash = "sha256:18186d413af873de17577779909590747474314d5f1a0694d137ce6e51ac092b", size = 696143, upload-time = "2026-11-14T01:33:22.411Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/4a/8a3761924084c01ac833f0c3addc21fff1b51a7e79e7f9879d53ae663018/mobilerun_sdk-6.2.1-py3-none-any.whl", hash = "sha256:0656ff182531c7e2dbaf6dfc84b3c7ec9a3ecaaf62d891f08886358c9a0b3648", size = 696157, upload-time = "2026-11-14T09:38:00.28Z" },
 ]
 
 [[package]]
