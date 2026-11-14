@@ -36,7 +36,7 @@
 
 Each example is self-contained, runnable, and documents the decisions you
 should revisit before taking it to production. Both examples use the published
-SDK 6.2.0 object API.
+SDK object API.
 
 ## 🚀 Quick start
 

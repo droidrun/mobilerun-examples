@@ -1,7 +1,7 @@
 # Signed webhook receiver with file download
 
 This web server receives mobilerun webhook events, verifies their raw-body
-signatures with `verify_webhook` from `mobilerun-sdk` 6.2.0, and downloads a
+signatures with `verify_webhook` from `mobilerun-sdk`, and downloads a
 referenced workflow file through `mobilerun_sdk.MobilerunSDK`.
 
 It uses two independent credentials:
@@ -24,9 +24,9 @@ The receiver:
 - returns 5xx after download failures so mobilerun can retry.
 
 Authentication failures return HTTP 401 with the SDK failure reason. HTTP 400
-for correctly signed but invalid JSON requires `mobilerun-sdk` 6.2.1+; with the
-locked 6.2.0 release, that case returns HTTP 401 (`malformed`). The regression
-test for HTTP 400 is a strict expected failure until that upgrade.
+for correctly signed but invalid JSON requires `mobilerun-sdk` 6.2.1+. Earlier
+releases return HTTP 401 (`malformed`) for that case. The regression test for
+HTTP 400 is a strict expected failure until that upgrade.
 
 The replay cache is in memory for this single-process example. Use Redis or a
 database with a unique event-ID constraint when running multiple instances.
@@ -48,7 +48,7 @@ uv sync
 
 The focused
 [`mobilerun-sdk`](https://pypi.org/project/mobilerun-sdk/) package is installed
-from PyPI (locked to 6.2.0) and supplies `mobilerun_sdk` without pulling in the full automation
+from PyPI and supplies `mobilerun_sdk` without pulling in the full automation
 runtime.
 
 ## Project layout
@@ -63,7 +63,7 @@ mobilerun_webhook_receiver/
   config.py                         # environment validation
   security.py                       # webhook header names and replay protection
   downloader.py                     # SDK request and atomic file storage
-  application.py                    # SDK verification and webhook event processing
+  application.py                    # SDK verification and event processing
   http_server.py                    # HTTP transport
   showcase_events.py                # bounded event replay for the showcase
 ```

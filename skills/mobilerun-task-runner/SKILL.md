@@ -17,12 +17,12 @@ task lifecycle when adapting it.
    [`README.md`](../../examples/typescript/task-runner/README.md),
    [`package.json`](../../examples/typescript/task-runner/package.json), and
    [`.env.example`](../../examples/typescript/task-runner/.env.example).
-2. Install `@mobilerun/sdk` 6.2.0 and `@mobilerun/react` ^0.2.0 from npm. Do not
-   add local package overrides. Keep `MOBILERUN_API_KEY` on the server and use
+2. Install `@mobilerun/sdk` and `@mobilerun/react` from npm. Do not add local
+   package overrides. Keep `MOBILERUN_API_KEY` on the server and use
    `MOBILERUN_API_URL` only to override the default API base.
 3. Use `MobilerunSDK` object handles: `sdk.devices.fromId(deviceId).run()`,
-   `sdk.tasks.fromId(taskId).refresh()`, and `task.stop()`. Keep SDK calls behind
-   a server adapter. Keep validation and public response
+   `sdk.tasks.fromId(taskId).refresh()`, and `task.stop()`. Keep SDK calls
+   behind a server adapter. Keep validation and public response
    schemas independent from SDK response types.
 4. Implement the run lifecycle: list eligible devices, start a task, expose
    scoped stream credentials, poll task status serially, stop on request, and

@@ -1,12 +1,10 @@
-"""Webhook authentication and replay protection."""
+"""Replay protection and event header names."""
 
 from __future__ import annotations
 
 import threading
 import time
 
-SIGNATURE_HEADER = "X-Mobilerun-Signature"
-TIMESTAMP_HEADER = "X-Mobilerun-Timestamp"
 EVENT_ID_HEADER = "X-Mobilerun-Event-Id"
 EVENT_TYPE_HEADER = "X-Mobilerun-Event-Type"
 

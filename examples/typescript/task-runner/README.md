@@ -1,7 +1,7 @@
 # Embedded Mobilerun task runner
 
 This example starts a Mobilerun task with the server-side `@mobilerun/sdk`
-6.2.0 object API and renders the returned device stream with `@mobilerun/react`.
+object API and renders the returned device stream with `@mobilerun/react`.
 
 The Mobilerun API key never reaches the browser:
 

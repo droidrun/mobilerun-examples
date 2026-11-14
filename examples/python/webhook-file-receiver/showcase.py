@@ -172,7 +172,7 @@ class Showcase:
                 activation="custom",
                 page_size=100,
             )
-            items = [as_json(trigger.info) for trigger in page]
+            items = [as_json(trigger.info) for trigger in page.items]
 
         return [
             {
@@ -529,7 +529,7 @@ def build_showcase(
             host=settings.host,
             port=settings.port,
             webhook_path=webhook_path,
-            webhook_secret=webhook_secret.encode(),
+            webhook_secret=webhook_secret,
             api_base_url=settings.api_base_url,
             api_key=settings.api_key,
             download_dir=settings.download_dir,

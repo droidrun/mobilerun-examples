@@ -1,6 +1,6 @@
 ---
 name: mobilerun-webhooks
-description: Build, run, test, or troubleshoot Python receivers for signed Mobilerun webhooks using the published mobilerun-sdk package. Use for HMAC verification, webhook retries and replay protection, secure downloads of files referenced by workflow events, or the bundled webhook showcase. Do not use for general Mobilerun tasks, outbound workflow configuration without a receiving webhook, or TypeScript task-runner integrations.
+description: Build, run, test, or troubleshoot Python receivers for signed Mobilerun webhooks using the published mobilerun-sdk package. Use for SDK signature verification, webhook retries and replay protection, secure downloads of files referenced by workflow events, or the bundled webhook showcase. Do not use for general Mobilerun tasks, outbound workflow configuration without a receiving webhook, or TypeScript task-runner integrations.
 ---
 
 # Mobilerun webhooks
@@ -34,12 +34,13 @@ the minimal executable entry point.
 
 ## Required security properties
 
-- Interpret `X-Mobilerun-Timestamp` as Unix time in milliseconds. Verify
-  `X-Mobilerun-Signature` as `sha256=<lowercase hex>` where the hex value is
-  `HMAC-SHA256(secret, timestamp-as-ASCII + b"." + exact-raw-body)`; never
-  reserialize JSON before verification.
-- Use constant-time comparison and reject timestamps outside the configured
-  freshness window.
+- Pass the exact raw body and request headers to `verify_webhook` from
+  `mobilerun_sdk`, with the signing secret and configured freshness tolerance
+  in seconds. The SDK verifies signatures and timestamps before parsing JSON;
+  never reserialize the body before verification.
+- Map `WebhookVerificationError` to HTTP 401 using its reason. The
+  `invalid_json` reason maps to HTTP 400; see the receiver README for SDK
+  compatibility.
 - Match the signed event ID/type to their headers and deduplicate event IDs.
 - Validate `downloadPath`, `fileId`, filename, declared size, and streamed size.
 - Use the authenticated SDK client only for the mobilerun API request.
@@ -50,11 +51,12 @@ the minimal executable entry point.
 
 ## SDK usage
 
-The file-content route is not a modeled SDK resource, so call the
-`mobilerun_sdk.Mobilerun` client's public
-`get(..., cast_to=httpx.Response, stream=True)` method for the authenticated API
-hop. Handle a presigned storage redirect with a separate unauthenticated
-`httpx.Client`.
+Use `mobilerun_sdk.MobilerunSDK` for webhook and workflow object handles.
+For file downloads, call `MobilerunSDK(...).api.get(...,
+cast_to=httpx.Response, stream=True)` for the authenticated API hop. The SDK's
+file download helper buffers the body; streaming preserves the receiver's size
+cap. Handle the presigned storage redirect with a separate unauthenticated
+`httpx.Client`, so the API token never reaches storage.
 
 After changes, run the repository check from the repository root and run the
 skill validator when it is available. Never make live API changes unless the

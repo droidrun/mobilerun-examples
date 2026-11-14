@@ -38,14 +38,11 @@ export function createMobilerunTaskDeps(sdk: MobilerunSDK): TaskServiceDeps {
       };
     },
     async listDevices() {
-      const devices = [];
-      for await (const device of sdk.devices.list({
+      const page = await sdk.devices.list({
         pageSize: 100,
         state: ['ready', 'assigned'],
-      })) {
-        if (device.info) devices.push(device.info);
-      }
-      return devices;
+      });
+      return page.items.flatMap((device) => (device.info ? [device.info] : []));
     },
     async retrieveTask(taskId) {
       const response = await sdk.tasks.fromId(taskId).refresh();
@@ -64,10 +61,10 @@ export function createMobilerunTaskDeps(sdk: MobilerunSDK): TaskServiceDeps {
       };
     },
     async retrieveDevice(deviceId) {
-      const { info } = await sdk.devices.get(deviceId);
+      const device = await sdk.devices.fromId(deviceId).refresh();
       return {
-        streamUrl: info?.streamUrl,
-        streamToken: info?.streamToken,
+        streamUrl: device.streamUrl,
+        streamToken: device.streamToken,
       };
     },
     stopTask(taskId) {

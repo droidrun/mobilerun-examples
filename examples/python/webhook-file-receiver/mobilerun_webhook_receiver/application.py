@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Mapping
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Protocol
 
-import mobilerun_sdk
+from mobilerun_sdk import WebhookVerificationError, verify_webhook
 
 from .config import Config
 from .downloader import MobilerunFileDownloader
@@ -42,12 +41,12 @@ class WebhookApplication:
         headers: Mapping[str, str],
         raw_body: bytes,
     ) -> tuple[int, dict[str, Any]]:
-        auth_error = self._authenticate(headers, raw_body)
-        if auth_error:
-            return auth_error
+        event = self._authenticate(headers, raw_body)
+        if isinstance(event, tuple):
+            return event
 
         event_id = _header(headers, EVENT_ID_HEADER)
-        event = self._parse_event(headers, raw_body, event_id)
+        event = self._parse_event(headers, event, event_id)
         if isinstance(event, tuple):
             return event
         if not self.deduper.claim(event_id):
@@ -61,33 +60,28 @@ class WebhookApplication:
         self,
         headers: Mapping[str, str],
         raw_body: bytes,
-    ) -> tuple[int, dict[str, Any]] | None:
+    ) -> Any:
         try:
-            mobilerun_sdk.verify_webhook(
+            return verify_webhook(
                 raw_body,
                 headers,
-                self.config.webhook_secret.decode("utf-8"),
+                self.config.webhook_secret,
                 tolerance=self.config.max_timestamp_age_ms / 1000,
-                now=time.time(),
             )
-        except mobilerun_sdk.WebhookVerificationError as exc:
+        except WebhookVerificationError as exc:
+            # The invalid_json reason arrives with SDK 6.2.1.
             if exc.reason == "invalid_json":
                 return HTTPStatus.BAD_REQUEST, {"message": "invalid JSON"}
             return HTTPStatus.UNAUTHORIZED, {"message": exc.reason}
-        return None
 
     @staticmethod
     def _parse_event(
         headers: Mapping[str, str],
-        raw_body: bytes,
+        event: Any,
         event_id: str,
     ) -> dict[str, Any] | tuple[int, dict[str, Any]]:
         if not event_id:
             return HTTPStatus.BAD_REQUEST, {"message": "missing event id"}
-        try:
-            event = json.loads(raw_body)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return HTTPStatus.BAD_REQUEST, {"message": "invalid JSON"}
         if not isinstance(event, dict):
             return HTTPStatus.BAD_REQUEST, {"message": "event must be an object"}
         if event.get("id") != event_id:

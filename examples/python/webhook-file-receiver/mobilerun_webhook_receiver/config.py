@@ -27,7 +27,7 @@ class Config:
     host: str
     port: int
     webhook_path: str
-    webhook_secret: bytes
+    webhook_secret: str
     api_base_url: str
     api_key: str
     download_dir: Path
@@ -62,7 +62,7 @@ class Config:
             host=values.get("HOST", "127.0.0.1"),
             port=positive_int(values, "PORT", 3000),
             webhook_path=webhook_path,
-            webhook_secret=secret.encode(),
+            webhook_secret=secret,
             api_base_url=api_base_url,
             api_key=api_key,
             download_dir=Path(values.get("DOWNLOAD_DIR", "./downloads")),
