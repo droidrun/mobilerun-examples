@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Protocol
+
+import mobilerun_sdk
 
 from .config import Config
 from .downloader import MobilerunFileDownloader
@@ -14,10 +17,7 @@ from .errors import DownloadError, PayloadError
 from .security import (
     EVENT_ID_HEADER,
     EVENT_TYPE_HEADER,
-    SIGNATURE_HEADER,
-    TIMESTAMP_HEADER,
     EventDeduper,
-    verify_signature,
 )
 
 
@@ -63,15 +63,17 @@ class WebhookApplication:
         raw_body: bytes,
     ) -> tuple[int, dict[str, Any]] | None:
         try:
-            verify_signature(
+            mobilerun_sdk.verify_webhook(
                 raw_body,
-                _header(headers, TIMESTAMP_HEADER),
-                _header(headers, SIGNATURE_HEADER),
-                self.config.webhook_secret,
-                max_age_ms=self.config.max_timestamp_age_ms,
+                headers,
+                self.config.webhook_secret.decode("utf-8"),
+                tolerance=self.config.max_timestamp_age_ms / 1000,
+                now=time.time(),
             )
-        except PayloadError as exc:
-            return HTTPStatus.UNAUTHORIZED, {"message": str(exc)}
+        except mobilerun_sdk.WebhookVerificationError as exc:
+            if exc.reason == "invalid_json":
+                return HTTPStatus.BAD_REQUEST, {"message": "invalid JSON"}
+            return HTTPStatus.UNAUTHORIZED, {"message": exc.reason}
         return None
 
     @staticmethod

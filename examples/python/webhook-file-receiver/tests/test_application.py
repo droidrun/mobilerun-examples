@@ -83,6 +83,25 @@ class ApplicationTests(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertEqual(result["message"], "event id mismatch")
 
+    def test_rejects_header_body_event_type_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloader = FakeDownloader(Path(directory) / "unused")
+            app = WebhookApplication(config(Path(directory)), downloader=downloader)
+            body = b'{"id":"event-1","type":"webhook.test","data":{}}'
+            timestamp = str(int(time.time() * 1000))
+            headers = {
+                TIMESTAMP_HEADER: timestamp,
+                SIGNATURE_HEADER: signature(body, timestamp),
+                EVENT_ID_HEADER: "event-1",
+                EVENT_TYPE_HEADER: "workflow.step.emit",
+            }
+
+            status, result = app.handle(headers, body)
+
+            self.assertEqual(status, 400)
+            self.assertEqual(result["message"], "event type mismatch")
+            self.assertEqual(downloader.calls, 0)
+
     def test_accepts_case_insensitive_webhook_headers(self):
         with tempfile.TemporaryDirectory() as directory:
             app = WebhookApplication(
