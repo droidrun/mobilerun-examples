@@ -66,6 +66,7 @@ export function createTaskService(
   deps: TaskServiceDeps,
   sessions: RunSessionStore,
 ): TaskService {
+  const warnedDeviceIds = new Set<string>();
   const resolveCredentials = async (
     deviceId: string,
     fallbackUrl?: string | null,
@@ -97,7 +98,16 @@ export function createTaskService(
       const devices = await deps.listDevices();
       return devices.flatMap((device) => {
         const parsed = deviceSummarySchema.safeParse(device);
-        return parsed.success ? [parsed.data] : [];
+        if (parsed.success) return [parsed.data];
+        const deviceId = device.id ?? '<missing>';
+        if (!warnedDeviceIds.has(deviceId)) {
+          warnedDeviceIds.add(deviceId);
+          console.warn('Skipping invalid device', {
+            deviceId,
+            paths: parsed.error.issues.map((issue) => issue.path.join('.')),
+          });
+        }
+        return [];
       });
     },
 
