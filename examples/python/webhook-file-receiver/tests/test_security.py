@@ -48,7 +48,6 @@ def test_respects_configured_tolerance(app, age_ms, status):
     assert app.handle(headers, BODY)[0] == status
 
 
-@pytest.mark.xfail(strict=True, reason="needs mobilerun-sdk 6.2.1 invalid_json")
 def test_signed_non_json_returns_bad_request(app):
     body = b"not JSON"
     headers = signed_headers(body, timestamp=NOW_MS)

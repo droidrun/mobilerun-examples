@@ -23,10 +23,8 @@ The receiver:
 - never forwards the mobilerun bearer token to presigned object storage;
 - returns 5xx after download failures so mobilerun can retry.
 
-Authentication failures return HTTP 401 with the SDK failure reason. HTTP 400
-for correctly signed but invalid JSON requires `mobilerun-sdk` 6.2.1+. Earlier
-releases return HTTP 401 (`malformed`) for that case. The regression test for
-HTTP 400 is a strict expected failure until that upgrade.
+Authentication failures return HTTP 401 with the SDK failure reason. Correctly
+signed but invalid JSON returns HTTP 400 with the message `invalid JSON`.
 
 The replay cache is in memory for this single-process example. Use Redis or a
 database with a unique event-ID constraint when running multiple instances.

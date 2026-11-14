@@ -69,7 +69,6 @@ class WebhookApplication:
                 tolerance=self.config.max_timestamp_age_ms / 1000,
             )
         except WebhookVerificationError as exc:
-            # The invalid_json reason arrives with SDK 6.2.1.
             if exc.reason == "invalid_json":
                 return HTTPStatus.BAD_REQUEST, {"message": "invalid JSON"}
             return HTTPStatus.UNAUTHORIZED, {"message": exc.reason}
