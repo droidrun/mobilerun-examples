@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { TaskStatus } from '@/shared/contracts';
+import type { TaskGetStatusResponse } from '@mobilerun/sdk/resources/tasks/tasks';
+import { taskStatusSchema } from '@/shared/contracts';
 import { createRunSessionStore } from './run-session-store';
 import {
   createTaskService,
@@ -154,17 +155,21 @@ describe('task service', () => {
     expect(cancelled).toEqual([TASK_ID]);
   });
 
-  test('supports every known task status', () => {
-    const statuses: Array<TaskStatus> = [
-      'queued',
-      'created',
-      'running',
-      'cancelling',
-      'paused',
-      'completed',
-      'failed',
-      'cancelled',
-    ];
-    expect(statuses).toHaveLength(8);
+  test('parses every SDK task status and rejects unsupported statuses', () => {
+    const statuses = {
+      prepared: true,
+      queued: true,
+      created: true,
+      running: true,
+      cancelling: true,
+      completed: true,
+      failed: true,
+      cancelled: true,
+    } satisfies Record<TaskGetStatusResponse['status'], true>;
+    expect(Object.keys(statuses)).toEqual(taskStatusSchema.options);
+    for (const status of Object.keys(statuses)) {
+      expect(status).toBe(taskStatusSchema.parse(status));
+    }
+    expect(taskStatusSchema.safeParse('paused').success).toBe(false);
   });
 });

@@ -179,8 +179,7 @@ class Showcase:
                 "id": item["id"],
                 "name": item["name"],
                 "description": item.get("description"),
-                "schema": item.get("custom_payload_schema")
-                or item.get("customPayloadSchema"),
+                "schema": item.get("custom_payload_schema"),
             }
             for item in items
         ]

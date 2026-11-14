@@ -109,7 +109,7 @@ export function createApiApp({ service }: AppOptions): Hono {
         201,
       );
     } catch (error) {
-      console.error('tasks.run failed', error);
+      console.error('device.run failed', error);
       return jsonResponse(
         {
           error: 'task_start_failed',
@@ -131,7 +131,7 @@ export function createApiApp({ service }: AppOptions): Hono {
         200,
       );
     } catch (error) {
-      console.error('tasks.retrieve failed', error);
+      console.error('task.refresh failed', error);
       return jsonResponse(
         {
           error: 'task_retrieve_failed',
@@ -153,7 +153,7 @@ export function createApiApp({ service }: AppOptions): Hono {
         200,
       );
     } catch (error) {
-      console.error('tasks.stop failed', error);
+      console.error('task.stop failed', error);
       const status = upstreamStatus(error);
       return jsonResponse(
         {
