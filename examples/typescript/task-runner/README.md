@@ -1,7 +1,7 @@
 # Embedded Mobilerun task runner
 
-This example starts a Mobilerun task with the server-side TypeScript SDK and
-renders the returned device stream with `@mobilerun/react`.
+This example starts a Mobilerun task with the server-side `@mobilerun/sdk`
+6.2.0 object API and renders the returned device stream with `@mobilerun/react`.
 
 The Mobilerun API key never reaches the browser:
 
@@ -72,9 +72,9 @@ the example server.
 | Route | Purpose |
 | --- | --- |
 | `GET /api/devices` | List available devices through `devices.list()` |
-| `POST /api/runs` | Validate a small public input contract and call `tasks.run()` |
+| `POST /api/runs` | Validate a small public input contract and call `device.run()` |
 | `GET /api/runs/:taskId` | Return a narrow task status/result view |
-| `POST /api/runs/:taskId/cancel` | Call `tasks.stop()` |
+| `POST /api/runs/:taskId/cancel` | Call `task.stop()` |
 | `GET /api/health` | Report whether the server SDK is configured |
 
 The start route requires `deviceId` and intentionally accepts only `task`,

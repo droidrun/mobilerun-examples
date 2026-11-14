@@ -32,10 +32,11 @@
 | Language | Example | What it demonstrates |
 | --- | --- | --- |
 | TypeScript | [Embedded task runner](examples/typescript/task-runner/) | Server-side SDK calls, a live `@mobilerun/react` device stream, status polling, and cancellation |
-| Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | HMAC verification, secure SDK downloads, atomic file storage, and a protected live showcase UI |
+| Python | [Signed webhook receiver with file download](examples/python/webhook-file-receiver/) | SDK webhook verification, guarded streaming downloads, atomic file storage, and a protected live showcase UI |
 
 Each example is self-contained, runnable, and documents the decisions you
-should revisit before taking it to production.
+should revisit before taking it to production. Both examples use the published
+SDK 6.2.0 object API.
 
 ## 🚀 Quick start
 
