@@ -4,7 +4,7 @@ from .application import WebhookApplication
 from .config import Config
 from .downloader import MobilerunFileDownloader
 from .errors import ConfigurationError, DownloadError, PayloadError
-from .security import EventDeduper, verify_signature
+from .security import EventDeduper
 
 __all__ = [
     "Config",
@@ -14,5 +14,4 @@ __all__ = [
     "MobilerunFileDownloader",
     "PayloadError",
     "WebhookApplication",
-    "verify_signature",
 ]

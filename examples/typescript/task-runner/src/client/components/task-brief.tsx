@@ -94,7 +94,7 @@ export function TaskBrief({ state, run, cancel, reset }: TaskBriefProps) {
               </option>
               {devices.map((device) => (
                 <option key={device.id} value={device.id}>
-                  {device.name} · {device.state}
+                  {device.name || device.id.slice(0, 8)} · {device.state}
                 </option>
               ))}
             </select>

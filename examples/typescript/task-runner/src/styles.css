@@ -561,6 +561,7 @@ h1 em {
   background: var(--muted);
 }
 
+.status-prepared .telemetry-dot,
 .status-running .telemetry-dot,
 .status-created .telemetry-dot {
   background: var(--acid);

@@ -1,8 +1,8 @@
 # Signed webhook receiver with file download
 
-This web server receives mobilerun webhook events, verifies their HMAC
-authentication, and downloads a referenced workflow file through
-`mobilerun_sdk.Mobilerun`.
+This web server receives mobilerun webhook events, verifies their raw-body
+signatures with `verify_webhook` from `mobilerun-sdk`, and downloads a
+referenced workflow file through `mobilerun_sdk.MobilerunSDK`.
 
 It uses two independent credentials:
 
@@ -14,13 +14,17 @@ It uses two independent credentials:
 
 The receiver:
 
-- verifies `HMAC-SHA256(secret, "<timestamp>.<raw-body>")` in constant time;
+- uses the SDK to verify `HMAC-SHA256(secret, "<timestamp>.<raw-body>")`
+  before parsing the event;
 - rejects stale requests and replayed event IDs;
 - matches the signed event ID and type to the request headers;
 - validates the file ID, download path, filename, and size;
 - streams the download to a temporary file and renames it atomically;
 - never forwards the mobilerun bearer token to presigned object storage;
 - returns 5xx after download failures so mobilerun can retry.
+
+Authentication failures return HTTP 401 with the SDK failure reason. Correctly
+signed but invalid JSON returns HTTP 400 with the message `invalid JSON`.
 
 The replay cache is in memory for this single-process example. Use Redis or a
 database with a unique event-ID constraint when running multiple instances.
@@ -55,9 +59,9 @@ showcase.css                        # responsive visual design
 showcase.js                         # session, launch, and live event client
 mobilerun_webhook_receiver/
   config.py                         # environment validation
-  security.py                       # HMAC and replay protection
+  security.py                       # webhook header names and replay protection
   downloader.py                     # SDK request and atomic file storage
-  application.py                    # webhook event processing
+  application.py                    # SDK verification and event processing
   http_server.py                    # HTTP transport
   showcase_events.py                # bounded event replay for the showcase
 ```

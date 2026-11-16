@@ -1,50 +1,12 @@
-"""Webhook authentication and replay protection."""
+"""Replay protection and event header names."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import threading
 import time
 
-from .errors import PayloadError
-
-SIGNATURE_HEADER = "X-Mobilerun-Signature"
-TIMESTAMP_HEADER = "X-Mobilerun-Timestamp"
 EVENT_ID_HEADER = "X-Mobilerun-Event-Id"
 EVENT_TYPE_HEADER = "X-Mobilerun-Event-Type"
-
-
-def verify_signature(
-    raw_body: bytes,
-    timestamp: str,
-    signature: str,
-    secret: bytes,
-    *,
-    now_ms: int | None = None,
-    max_age_ms: int = 300_000,
-) -> None:
-    """Verify timestamp freshness and HMAC over ``timestamp.raw_body``."""
-    try:
-        timestamp_ms = int(timestamp)
-        timestamp_bytes = timestamp.encode("ascii")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
-        raise PayloadError("invalid timestamp") from exc
-
-    current_ms = int(time.time() * 1000) if now_ms is None else now_ms
-    if abs(current_ms - timestamp_ms) > max_age_ms:
-        raise PayloadError("stale timestamp")
-
-    expected = (
-        "sha256="
-        + hmac.new(
-            secret,
-            timestamp_bytes + b"." + raw_body,
-            hashlib.sha256,
-        ).hexdigest()
-    )
-    if not hmac.compare_digest(expected, signature):
-        raise PayloadError("invalid signature")
 
 
 class EventDeduper:

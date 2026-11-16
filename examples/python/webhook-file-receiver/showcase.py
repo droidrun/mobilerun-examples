@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 from uuid import UUID
 
-from mobilerun_sdk import Mobilerun
+from mobilerun_sdk import MobilerunSDK
 from mobilerun_webhook_receiver.application import WebhookApplication
 from mobilerun_webhook_receiver.config import Config
 from mobilerun_webhook_receiver.showcase_events import EventHub
@@ -149,12 +149,12 @@ class Showcase:
         self,
         settings: ShowcaseSettings,
         config: Config,
-        client: Mobilerun,
+        sdk: MobilerunSDK,
         webhook_id: str,
     ) -> None:
         self.settings = settings
         self.config = config
-        self.client = client
+        self.sdk = sdk
         self.webhook_id = webhook_id
         self.receiver = WebhookApplication(config)
         self.events = EventHub()
@@ -165,23 +165,21 @@ class Showcase:
 
     def triggers(self) -> list[dict[str, Any]]:
         if self.settings.trigger_id:
-            response = self.client.workflows.triggers.retrieve(self.settings.trigger_id)
-            payload = as_json(response).get("data", {})
-            items = [payload]
+            trigger = self.sdk.workflows.triggers.get(self.settings.trigger_id)
+            items = [as_json(trigger.info).get("data", {})]
         else:
-            response = self.client.workflows.triggers.list(
+            page = self.sdk.workflows.triggers.list(
                 activation="custom",
                 page_size=100,
             )
-            items = as_json(response).get("items", [])
+            items = [as_json(trigger.info) for trigger in page.items]
 
         return [
             {
                 "id": item["id"],
                 "name": item["name"],
                 "description": item.get("description"),
-                "schema": item.get("custom_payload_schema")
-                or item.get("customPayloadSchema"),
+                "schema": item.get("custom_payload_schema"),
             }
             for item in items
         ]
@@ -194,11 +192,8 @@ class Showcase:
         trigger_id = str(UUID(trigger_id))
         if self.settings.trigger_id and trigger_id != self.settings.trigger_id:
             raise ValueError("trigger is not enabled for this showcase")
-        response = self.client.workflows.triggers.fire(
-            trigger_id,
-            payload=payload,
-        )
-        return as_json(response)
+        trigger = self.sdk.workflows.triggers.from_id(trigger_id)
+        return as_json(trigger.fire(payload=payload))
 
     def downloaded_file(self, file_id: str) -> Path | None:
         canonical = str(UUID(file_id))
@@ -504,7 +499,7 @@ def make_handler(showcase: Showcase):
 def build_showcase(
     settings: ShowcaseSettings,
 ) -> tuple[Showcase, bool]:
-    client = Mobilerun(
+    sdk = MobilerunSDK(
         api_key=settings.api_key,
         base_url=settings.api_base_url,
     )
@@ -514,11 +509,11 @@ def build_showcase(
         if owns_webhook:
             webhook_path = f"/mobilerun/showcase-{secrets.token_hex(16)}"
             webhook_url = f"{settings.public_url}{webhook_path}"
-            created = client.webhooks.create(
+            created = sdk.webhooks.create(
                 url=webhook_url,
                 description="Mobilerun live showcase (temporary)",
             )
-            webhook = as_json(created)["data"]
+            webhook = as_json(created.info)["data"]
             webhook_id = webhook["id"]
             webhook_secret = webhook["secret"]
         else:
@@ -533,7 +528,7 @@ def build_showcase(
             host=settings.host,
             port=settings.port,
             webhook_path=webhook_path,
-            webhook_secret=webhook_secret.encode(),
+            webhook_secret=webhook_secret,
             api_base_url=settings.api_base_url,
             api_key=settings.api_key,
             download_dir=settings.download_dir,
@@ -542,16 +537,16 @@ def build_showcase(
             max_timestamp_age_ms=300_000,
         )
         config.download_dir.mkdir(parents=True, exist_ok=True)
-        return Showcase(settings, config, client, webhook_id), owns_webhook
+        return Showcase(settings, config, sdk, webhook_id), owns_webhook
     except Exception:
         if owns_webhook and webhook_id and settings.delete_webhook_on_exit:
-            _delete_webhook(client, webhook_id)
+            _delete_webhook(sdk, webhook_id)
         raise
 
 
-def _delete_webhook(client: Mobilerun, webhook_id: str) -> None:
+def _delete_webhook(sdk: MobilerunSDK, webhook_id: str) -> None:
     try:
-        client.webhooks.delete(webhook_id)
+        sdk.webhooks.from_id(webhook_id).delete()
     except Exception as exc:  # noqa: BLE001 - cleanup must not mask shutdown
         print(
             json.dumps(
@@ -605,7 +600,7 @@ def main() -> None:
         if server is not None:
             server.server_close()
         if owns_webhook and settings.delete_webhook_on_exit:
-            _delete_webhook(showcase.client, showcase.webhook_id)
+            _delete_webhook(showcase.sdk, showcase.webhook_id)
 
 
 if __name__ == "__main__":

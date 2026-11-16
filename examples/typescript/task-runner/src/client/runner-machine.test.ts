@@ -3,6 +3,7 @@ import {
   createInitialRunnerState,
   runnerReducer,
 } from './runner-machine';
+import { statusLabel } from './status-label';
 
 const STARTED_RUN = {
   id: 'task-1',
@@ -40,6 +41,30 @@ describe('runner state machine', () => {
     expect(terminal.phase).toBe('terminal');
     expect(terminal.streamUrl).toBe('');
     expect(terminal.streamToken).toBe('');
+  });
+
+  test('keeps prepared tasks active and cancellable through polling', () => {
+    const active = runnerReducer(createInitialRunnerState(), {
+      type: 'start-succeeded',
+      run: { ...STARTED_RUN, status: 'prepared' },
+    });
+    const polled = runnerReducer(active, {
+      type: 'poll-succeeded',
+      task: {
+        id: STARTED_RUN.id,
+        status: 'prepared',
+        succeeded: null,
+        steps: null,
+        output: null,
+        finishedAt: null,
+      },
+    });
+
+    expect(polled.phase).toBe('active');
+    expect(polled.streamUrl).toBe(STARTED_RUN.streamUrl);
+    expect(statusLabel(polled, true)).toBe('Preparing task');
+    expect(runnerReducer(polled, { type: 'cancel-requested' }).phase)
+      .toBe('cancelling');
   });
 
   test('keeps an active run cancellable after a polling error', () => {

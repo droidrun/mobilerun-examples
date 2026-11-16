@@ -9,13 +9,7 @@ from io import StringIO
 from pathlib import Path
 
 from mobilerun_webhook_receiver.application import WebhookApplication
-from mobilerun_webhook_receiver.security import (
-    EVENT_ID_HEADER,
-    EVENT_TYPE_HEADER,
-    SIGNATURE_HEADER,
-    TIMESTAMP_HEADER,
-)
-from support import FILE_ID, FakeDownloader, config, signature
+from support import FILE_ID, FakeDownloader, config, signed_headers
 
 
 class ApplicationTests(unittest.TestCase):
@@ -42,12 +36,9 @@ class ApplicationTests(unittest.TestCase):
             }
             body = json.dumps(event, separators=(",", ":")).encode()
             timestamp = str(int(time.time() * 1000))
-            headers = {
-                TIMESTAMP_HEADER: timestamp,
-                SIGNATURE_HEADER: signature(body, timestamp),
-                EVENT_ID_HEADER: "event-1",
-                EVENT_TYPE_HEADER: "workflow.step.emit",
-            }
+            headers = signed_headers(
+                body, timestamp=timestamp, event_type="workflow.step.emit"
+            )
 
             output = StringIO()
             with redirect_stdout(output):
@@ -72,16 +63,28 @@ class ApplicationTests(unittest.TestCase):
             )
             body = b'{"id":"body-id","type":"webhook.test","data":{}}'
             timestamp = str(int(time.time() * 1000))
-            headers = {
-                TIMESTAMP_HEADER: timestamp,
-                SIGNATURE_HEADER: signature(body, timestamp),
-                EVENT_ID_HEADER: "header-id",
-            }
+            headers = signed_headers(body, timestamp=timestamp, event_id="header-id")
 
             status, result = app.handle(headers, body)
 
             self.assertEqual(status, 400)
             self.assertEqual(result["message"], "event id mismatch")
+
+    def test_rejects_header_body_event_type_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloader = FakeDownloader(Path(directory) / "unused")
+            app = WebhookApplication(config(Path(directory)), downloader=downloader)
+            body = b'{"id":"event-1","type":"webhook.test","data":{}}'
+            timestamp = str(int(time.time() * 1000))
+            headers = signed_headers(
+                body, timestamp=timestamp, event_type="workflow.step.emit"
+            )
+
+            status, result = app.handle(headers, body)
+
+            self.assertEqual(status, 400)
+            self.assertEqual(result["message"], "event type mismatch")
+            self.assertEqual(downloader.calls, 0)
 
     def test_accepts_case_insensitive_webhook_headers(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -92,10 +95,13 @@ class ApplicationTests(unittest.TestCase):
             body = b'{"id":"event-case","type":"webhook.test","data":{}}'
             timestamp = str(int(time.time() * 1000))
             headers = {
-                "x-mobilerun-timestamp": timestamp,
-                "x-mobilerun-signature": signature(body, timestamp),
-                "x-mobilerun-event-id": "event-case",
-                "x-mobilerun-event-type": "webhook.test",
+                key.lower(): value
+                for key, value in signed_headers(
+                    body,
+                    timestamp=timestamp,
+                    event_id="event-case",
+                    event_type="webhook.test",
+                ).items()
             }
 
             status, result = app.handle(headers, body)

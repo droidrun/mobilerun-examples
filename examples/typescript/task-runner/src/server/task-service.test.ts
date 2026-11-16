@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import type { TaskStatus } from '@/shared/contracts';
+import { describe, expect, spyOn, test } from 'bun:test';
+import type { TaskGetStatusResponse } from '@mobilerun/sdk/resources/tasks/tasks';
+import { taskStatusSchema } from '@/shared/contracts';
 import { createRunSessionStore } from './run-session-store';
 import {
   createTaskService,
@@ -125,20 +126,46 @@ describe('task service', () => {
     expect(deviceCalls).toBe(0);
   });
 
-  test('filters incomplete device records', async () => {
+  test.each(['', undefined])('lists devices with name %p', async (name) => {
     const service = createService({
-      listDevices: async () => [
-        {
-          id: DEVICE_ID,
-          name: 'Example device',
-          state: 'ready',
-          type: 'dedicated_premium_device',
-        },
-        { id: 'incomplete', name: 'Missing state' },
-      ],
+      listDevices: async () => [{
+        id: DEVICE_ID,
+        ...(name === undefined ? {} : { name }),
+        state: 'ready',
+        type: 'dedicated_premium_device',
+      }],
     });
 
-    expect(await service.listDevices()).toHaveLength(1);
+    expect(await service.listDevices()).toEqual([{
+      id: DEVICE_ID,
+      name: '',
+      state: 'ready',
+      type: 'dedicated_premium_device',
+    }]);
+  });
+
+  test('warns once per invalid device id and skips invalid records', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const service = createService({
+        listDevices: async () => [
+          { name: 'Missing id', state: 'ready', type: 'dedicated_premium_device' },
+          { id: 'incomplete', name: 'Missing state' },
+        ],
+      });
+
+      expect(await service.listDevices()).toEqual([]);
+      expect(await service.listDevices()).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledWith('Skipping invalid device', {
+        deviceId: '<missing>', paths: ['id'],
+      });
+      expect(warn).toHaveBeenCalledWith('Skipping invalid device', {
+        deviceId: 'incomplete', paths: ['state', 'type'],
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('passes cancellation to the SDK adapter', async () => {
@@ -154,17 +181,21 @@ describe('task service', () => {
     expect(cancelled).toEqual([TASK_ID]);
   });
 
-  test('supports every known task status', () => {
-    const statuses: Array<TaskStatus> = [
-      'queued',
-      'created',
-      'running',
-      'cancelling',
-      'paused',
-      'completed',
-      'failed',
-      'cancelled',
-    ];
-    expect(statuses).toHaveLength(8);
+  test('parses every SDK task status and rejects unsupported statuses', () => {
+    const statuses = {
+      prepared: true,
+      queued: true,
+      created: true,
+      running: true,
+      cancelling: true,
+      completed: true,
+      failed: true,
+      cancelled: true,
+    } satisfies Record<TaskGetStatusResponse['status'], true>;
+    expect(Object.keys(statuses)).toEqual(taskStatusSchema.options);
+    for (const status of Object.keys(statuses)) {
+      expect(status).toBe(taskStatusSchema.parse(status));
+    }
+    expect(taskStatusSchema.safeParse('paused').success).toBe(false);
   });
 });

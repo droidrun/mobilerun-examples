@@ -1,7 +1,7 @@
 # Embedded Mobilerun task runner
 
-This example starts a Mobilerun task with the server-side TypeScript SDK and
-renders the returned device stream with `@mobilerun/react`.
+This example starts a Mobilerun task with the server-side `@mobilerun/sdk`
+object API and renders the returned device stream with `@mobilerun/react`.
 
 The Mobilerun API key never reaches the browser:
 
@@ -13,11 +13,11 @@ browser ──same-origin HTTP──▶ Bun + Hono ──@mobilerun/sdk──▶
 
 ## What it demonstrates
 
-- starting a task with `client.tasks.run()`;
+- starting a task with `device.run()` on a `MobilerunSDK` device handle;
 - listing available devices and selecting one for the task;
 - resolving `streamUrl` and `streamToken` from the selected device;
 - polling a narrow server endpoint for task status and structured output;
-- cancelling a running task with `client.tasks.stop()`;
+- cancelling a running task with `task.stop()`;
 - refreshing stream credentials from the task's device when necessary;
 - expiring and bounding the in-memory stream credential cache;
 - polling without overlapping task-status requests;
@@ -72,9 +72,9 @@ the example server.
 | Route | Purpose |
 | --- | --- |
 | `GET /api/devices` | List available devices through `devices.list()` |
-| `POST /api/runs` | Validate a small public input contract and call `tasks.run()` |
+| `POST /api/runs` | Validate a small public input contract and call `device.run()` |
 | `GET /api/runs/:taskId` | Return a narrow task status/result view |
-| `POST /api/runs/:taskId/cancel` | Call `tasks.stop()` |
+| `POST /api/runs/:taskId/cancel` | Call `task.stop()` |
 | `GET /api/health` | Report whether the server SDK is configured |
 
 The start route requires `deviceId` and intentionally accepts only `task`,

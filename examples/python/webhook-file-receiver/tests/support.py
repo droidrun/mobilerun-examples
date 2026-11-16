@@ -8,18 +8,39 @@ from pathlib import Path
 
 from mobilerun_webhook_receiver.config import Config
 
-SECRET = b"whsec_test"
+SECRET = "whsec_test"
 NOW_MS = 1_800_000_000_000
 FILE_ID = "3523498b-1053-44c2-9885-651491a49e7b"
 
 
 def signature(body: bytes, timestamp: str = str(NOW_MS)) -> str:
     digest = hmac.new(
-        SECRET,
+        SECRET.encode(),
         timestamp.encode() + b"." + body,
         hashlib.sha256,
     ).hexdigest()
     return f"sha256={digest}"
+
+
+def signed_headers(
+    body: bytes,
+    *,
+    timestamp: str | int,
+    event_id: str = "event-1",
+    event_type: str | None = None,
+    signature_value: str | None = None,
+) -> dict[str, str]:
+    timestamp = str(timestamp)
+    headers = {
+        "X-Mobilerun-Timestamp": timestamp,
+        "X-Mobilerun-Signature": (
+            signature(body, timestamp) if signature_value is None else signature_value
+        ),
+        "X-Mobilerun-Event-Id": event_id,
+    }
+    if event_type is not None:
+        headers["X-Mobilerun-Event-Type"] = event_type
+    return headers
 
 
 def config(download_dir: Path) -> Config:

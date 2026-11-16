@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
-from mobilerun_sdk import APIError, Mobilerun
+from mobilerun_sdk import APIError, MobilerunSDK
 
 from .config import Config
 from .errors import DownloadError, PayloadError
@@ -40,11 +40,11 @@ class MobilerunFileDownloader:
         self,
         config: Config,
         *,
-        sdk_client: Mobilerun | None = None,
+        sdk: MobilerunSDK | None = None,
         storage_client: httpx.Client | None = None,
     ):
         self.config = config
-        self.sdk_client = sdk_client or Mobilerun(
+        self.sdk = sdk or MobilerunSDK(
             api_key=config.api_key,
             base_url=config.api_base_url,
         )
@@ -91,12 +91,15 @@ class MobilerunFileDownloader:
         return canonical_file_id, filename, download_path, expected_size
 
     def _open_api_or_storage(self, download_path: str) -> httpx.Response:
+        # Stays on the raw client (`sdk.api`): `AgentFile.download()` buffers the
+        # whole body, but this receiver caps size while streaming and must not
+        # forward API auth to object storage.
         # The SDK base URL already ends in /v1. Webhook downloadPath values are
         # API-root paths that also start with /v1, so passing them through
         # verbatim would request /v1/v1/agents/files/... and return 404.
         sdk_path = download_path.removeprefix("/v1")
         try:
-            response = self.sdk_client.get(
+            response = self.sdk.api.get(
                 sdk_path,
                 cast_to=httpx.Response,
                 options={

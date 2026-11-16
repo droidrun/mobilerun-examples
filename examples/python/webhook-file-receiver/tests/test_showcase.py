@@ -30,13 +30,22 @@ def settings(download_dir: Path, **overrides) -> ShowcaseSettings:
     return ShowcaseSettings(**values)
 
 
+class FakeTrigger:
+    def __init__(self, triggers, trigger_id):
+        self.triggers = triggers
+        self.id = trigger_id
+
+    def fire(self, *, payload):
+        self.triggers.fired.append((self.id, payload))
+        return {"enqueuedCount": 1}
+
+
 class FakeTriggers:
     def __init__(self):
         self.fired = []
 
-    def fire(self, trigger_id, *, payload):
-        self.fired.append((trigger_id, payload))
-        return {"enqueuedCount": 1}
+    def from_id(self, trigger_id):
+        return FakeTrigger(self, trigger_id)
 
 
 class FakeWorkflows:
